@@ -10,7 +10,7 @@ const auth = require('../../src/middlewares/auth');
 const { tokenService, emailService } = require('../../src/services');
 const ApiError = require('../../src/utils/ApiError');
 const setupTestDB = require('../utils/setupTestDB');
-const { User, Token } = require('../../src/models');
+const prisma = require('../../src/config/prisma');
 const { roleRights } = require('../../src/config/roles');
 const { tokenTypes } = require('../../src/config/tokens');
 const { userOne, admin, insertUsers } = require('../fixtures/user.fixture');
@@ -41,7 +41,7 @@ describe('Auth routes', () => {
         isEmailVerified: false,
       });
 
-      const dbUser = await User.findById(res.body.user.id);
+      const dbUser = await prisma.user.findUnique({ where: { id: res.body.user.id } });
       expect(dbUser).toBeDefined();
       expect(dbUser.password).not.toBe(newUser.password);
       expect(dbUser).toMatchObject({ name: newUser.name, email: newUser.email, role: 'user', isEmailVerified: false });
@@ -134,12 +134,12 @@ describe('Auth routes', () => {
     test('should return 204 if refresh token is valid', async () => {
       await insertUsers([userOne]);
       const expires = moment().add(config.jwt.refreshExpirationDays, 'days');
-      const refreshToken = tokenService.generateToken(userOne._id, expires, tokenTypes.REFRESH);
-      await tokenService.saveToken(refreshToken, userOne._id, expires, tokenTypes.REFRESH);
+      const refreshToken = tokenService.generateToken(userOne.id, expires, tokenTypes.REFRESH);
+      await tokenService.saveToken(refreshToken, userOne.id, expires, tokenTypes.REFRESH);
 
       await request(app).post('/v1/auth/logout').send({ refreshToken }).expect(httpStatus.NO_CONTENT);
 
-      const dbRefreshTokenDoc = await Token.findOne({ token: refreshToken });
+      const dbRefreshTokenDoc = await prisma.token.findFirst({ where: { token: refreshToken } });
       expect(dbRefreshTokenDoc).toBe(null);
     });
 
@@ -150,7 +150,7 @@ describe('Auth routes', () => {
     test('should return 404 error if refresh token is not found in the database', async () => {
       await insertUsers([userOne]);
       const expires = moment().add(config.jwt.refreshExpirationDays, 'days');
-      const refreshToken = tokenService.generateToken(userOne._id, expires, tokenTypes.REFRESH);
+      const refreshToken = tokenService.generateToken(userOne.id, expires, tokenTypes.REFRESH);
 
       await request(app).post('/v1/auth/logout').send({ refreshToken }).expect(httpStatus.NOT_FOUND);
     });
@@ -158,8 +158,8 @@ describe('Auth routes', () => {
     test('should return 404 error if refresh token is blacklisted', async () => {
       await insertUsers([userOne]);
       const expires = moment().add(config.jwt.refreshExpirationDays, 'days');
-      const refreshToken = tokenService.generateToken(userOne._id, expires, tokenTypes.REFRESH);
-      await tokenService.saveToken(refreshToken, userOne._id, expires, tokenTypes.REFRESH, true);
+      const refreshToken = tokenService.generateToken(userOne.id, expires, tokenTypes.REFRESH);
+      await tokenService.saveToken(refreshToken, userOne.id, expires, tokenTypes.REFRESH, true);
 
       await request(app).post('/v1/auth/logout').send({ refreshToken }).expect(httpStatus.NOT_FOUND);
     });
@@ -169,8 +169,8 @@ describe('Auth routes', () => {
     test('should return 200 and new auth tokens if refresh token is valid', async () => {
       await insertUsers([userOne]);
       const expires = moment().add(config.jwt.refreshExpirationDays, 'days');
-      const refreshToken = tokenService.generateToken(userOne._id, expires, tokenTypes.REFRESH);
-      await tokenService.saveToken(refreshToken, userOne._id, expires, tokenTypes.REFRESH);
+      const refreshToken = tokenService.generateToken(userOne.id, expires, tokenTypes.REFRESH);
+      await tokenService.saveToken(refreshToken, userOne.id, expires, tokenTypes.REFRESH);
 
       const res = await request(app).post('/v1/auth/refresh-tokens').send({ refreshToken }).expect(httpStatus.OK);
 
@@ -179,10 +179,10 @@ describe('Auth routes', () => {
         refresh: { token: expect.anything(), expires: expect.anything() },
       });
 
-      const dbRefreshTokenDoc = await Token.findOne({ token: res.body.refresh.token });
-      expect(dbRefreshTokenDoc).toMatchObject({ type: tokenTypes.REFRESH, user: userOne._id, blacklisted: false });
+      const dbRefreshTokenDoc = await prisma.token.findFirst({ where: { token: res.body.refresh.token } });
+      expect(dbRefreshTokenDoc).toMatchObject({ type: tokenTypes.REFRESH, userId: userOne.id, blacklisted: false });
 
-      const dbRefreshTokenCount = await Token.countDocuments();
+      const dbRefreshTokenCount = await prisma.token.count();
       expect(dbRefreshTokenCount).toBe(1);
     });
 
@@ -193,8 +193,8 @@ describe('Auth routes', () => {
     test('should return 401 error if refresh token is signed using an invalid secret', async () => {
       await insertUsers([userOne]);
       const expires = moment().add(config.jwt.refreshExpirationDays, 'days');
-      const refreshToken = tokenService.generateToken(userOne._id, expires, tokenTypes.REFRESH, 'invalidSecret');
-      await tokenService.saveToken(refreshToken, userOne._id, expires, tokenTypes.REFRESH);
+      const refreshToken = tokenService.generateToken(userOne.id, expires, tokenTypes.REFRESH, 'invalidSecret');
+      await tokenService.saveToken(refreshToken, userOne.id, expires, tokenTypes.REFRESH);
 
       await request(app).post('/v1/auth/refresh-tokens').send({ refreshToken }).expect(httpStatus.UNAUTHORIZED);
     });
@@ -202,7 +202,7 @@ describe('Auth routes', () => {
     test('should return 401 error if refresh token is not found in the database', async () => {
       await insertUsers([userOne]);
       const expires = moment().add(config.jwt.refreshExpirationDays, 'days');
-      const refreshToken = tokenService.generateToken(userOne._id, expires, tokenTypes.REFRESH);
+      const refreshToken = tokenService.generateToken(userOne.id, expires, tokenTypes.REFRESH);
 
       await request(app).post('/v1/auth/refresh-tokens').send({ refreshToken }).expect(httpStatus.UNAUTHORIZED);
     });
@@ -210,8 +210,8 @@ describe('Auth routes', () => {
     test('should return 401 error if refresh token is blacklisted', async () => {
       await insertUsers([userOne]);
       const expires = moment().add(config.jwt.refreshExpirationDays, 'days');
-      const refreshToken = tokenService.generateToken(userOne._id, expires, tokenTypes.REFRESH);
-      await tokenService.saveToken(refreshToken, userOne._id, expires, tokenTypes.REFRESH, true);
+      const refreshToken = tokenService.generateToken(userOne.id, expires, tokenTypes.REFRESH);
+      await tokenService.saveToken(refreshToken, userOne.id, expires, tokenTypes.REFRESH, true);
 
       await request(app).post('/v1/auth/refresh-tokens').send({ refreshToken }).expect(httpStatus.UNAUTHORIZED);
     });
@@ -219,16 +219,20 @@ describe('Auth routes', () => {
     test('should return 401 error if refresh token is expired', async () => {
       await insertUsers([userOne]);
       const expires = moment().subtract(1, 'minutes');
-      const refreshToken = tokenService.generateToken(userOne._id, expires);
-      await tokenService.saveToken(refreshToken, userOne._id, expires, tokenTypes.REFRESH);
+      const refreshToken = tokenService.generateToken(userOne.id, expires);
+      await tokenService.saveToken(refreshToken, userOne.id, expires, tokenTypes.REFRESH);
 
       await request(app).post('/v1/auth/refresh-tokens').send({ refreshToken }).expect(httpStatus.UNAUTHORIZED);
     });
 
     test('should return 401 error if user is not found', async () => {
+      await insertUsers([userOne]);
       const expires = moment().add(config.jwt.refreshExpirationDays, 'days');
-      const refreshToken = tokenService.generateToken(userOne._id, expires, tokenTypes.REFRESH);
-      await tokenService.saveToken(refreshToken, userOne._id, expires, tokenTypes.REFRESH);
+      const refreshToken = tokenService.generateToken(userOne.id, expires, tokenTypes.REFRESH);
+      await tokenService.saveToken(refreshToken, userOne.id, expires, tokenTypes.REFRESH);
+      // deleting the user cascades and removes the token row too, since a Token
+      // can't exist without its User in Postgres (unlike the old Mongo setup)
+      await prisma.user.delete({ where: { id: userOne.id } });
 
       await request(app).post('/v1/auth/refresh-tokens').send({ refreshToken }).expect(httpStatus.UNAUTHORIZED);
     });
@@ -247,7 +251,9 @@ describe('Auth routes', () => {
 
       expect(sendResetPasswordEmailSpy).toHaveBeenCalledWith(userOne.email, expect.any(String));
       const resetPasswordToken = sendResetPasswordEmailSpy.mock.calls[0][1];
-      const dbResetPasswordTokenDoc = await Token.findOne({ token: resetPasswordToken, user: userOne._id });
+      const dbResetPasswordTokenDoc = await prisma.token.findFirst({
+        where: { token: resetPasswordToken, userId: userOne.id },
+      });
       expect(dbResetPasswordTokenDoc).toBeDefined();
     });
 
@@ -266,8 +272,8 @@ describe('Auth routes', () => {
     test('should return 204 and reset the password', async () => {
       await insertUsers([userOne]);
       const expires = moment().add(config.jwt.resetPasswordExpirationMinutes, 'minutes');
-      const resetPasswordToken = tokenService.generateToken(userOne._id, expires, tokenTypes.RESET_PASSWORD);
-      await tokenService.saveToken(resetPasswordToken, userOne._id, expires, tokenTypes.RESET_PASSWORD);
+      const resetPasswordToken = tokenService.generateToken(userOne.id, expires, tokenTypes.RESET_PASSWORD);
+      await tokenService.saveToken(resetPasswordToken, userOne.id, expires, tokenTypes.RESET_PASSWORD);
 
       await request(app)
         .post('/v1/auth/reset-password')
@@ -275,11 +281,13 @@ describe('Auth routes', () => {
         .send({ password: 'password2' })
         .expect(httpStatus.NO_CONTENT);
 
-      const dbUser = await User.findById(userOne._id);
+      const dbUser = await prisma.user.findUnique({ where: { id: userOne.id } });
       const isPasswordMatch = await bcrypt.compare('password2', dbUser.password);
       expect(isPasswordMatch).toBe(true);
 
-      const dbResetPasswordTokenCount = await Token.countDocuments({ user: userOne._id, type: tokenTypes.RESET_PASSWORD });
+      const dbResetPasswordTokenCount = await prisma.token.count({
+        where: { userId: userOne.id, type: tokenTypes.RESET_PASSWORD },
+      });
       expect(dbResetPasswordTokenCount).toBe(0);
     });
 
@@ -292,8 +300,8 @@ describe('Auth routes', () => {
     test('should return 401 if reset password token is blacklisted', async () => {
       await insertUsers([userOne]);
       const expires = moment().add(config.jwt.resetPasswordExpirationMinutes, 'minutes');
-      const resetPasswordToken = tokenService.generateToken(userOne._id, expires, tokenTypes.RESET_PASSWORD);
-      await tokenService.saveToken(resetPasswordToken, userOne._id, expires, tokenTypes.RESET_PASSWORD, true);
+      const resetPasswordToken = tokenService.generateToken(userOne.id, expires, tokenTypes.RESET_PASSWORD);
+      await tokenService.saveToken(resetPasswordToken, userOne.id, expires, tokenTypes.RESET_PASSWORD, true);
 
       await request(app)
         .post('/v1/auth/reset-password')
@@ -305,8 +313,8 @@ describe('Auth routes', () => {
     test('should return 401 if reset password token is expired', async () => {
       await insertUsers([userOne]);
       const expires = moment().subtract(1, 'minutes');
-      const resetPasswordToken = tokenService.generateToken(userOne._id, expires, tokenTypes.RESET_PASSWORD);
-      await tokenService.saveToken(resetPasswordToken, userOne._id, expires, tokenTypes.RESET_PASSWORD);
+      const resetPasswordToken = tokenService.generateToken(userOne.id, expires, tokenTypes.RESET_PASSWORD);
+      await tokenService.saveToken(resetPasswordToken, userOne.id, expires, tokenTypes.RESET_PASSWORD);
 
       await request(app)
         .post('/v1/auth/reset-password')
@@ -316,9 +324,11 @@ describe('Auth routes', () => {
     });
 
     test('should return 401 if user is not found', async () => {
+      await insertUsers([userOne]);
       const expires = moment().add(config.jwt.resetPasswordExpirationMinutes, 'minutes');
-      const resetPasswordToken = tokenService.generateToken(userOne._id, expires, tokenTypes.RESET_PASSWORD);
-      await tokenService.saveToken(resetPasswordToken, userOne._id, expires, tokenTypes.RESET_PASSWORD);
+      const resetPasswordToken = tokenService.generateToken(userOne.id, expires, tokenTypes.RESET_PASSWORD);
+      await tokenService.saveToken(resetPasswordToken, userOne.id, expires, tokenTypes.RESET_PASSWORD);
+      await prisma.user.delete({ where: { id: userOne.id } });
 
       await request(app)
         .post('/v1/auth/reset-password')
@@ -330,8 +340,8 @@ describe('Auth routes', () => {
     test('should return 400 if password is missing or invalid', async () => {
       await insertUsers([userOne]);
       const expires = moment().add(config.jwt.resetPasswordExpirationMinutes, 'minutes');
-      const resetPasswordToken = tokenService.generateToken(userOne._id, expires, tokenTypes.RESET_PASSWORD);
-      await tokenService.saveToken(resetPasswordToken, userOne._id, expires, tokenTypes.RESET_PASSWORD);
+      const resetPasswordToken = tokenService.generateToken(userOne.id, expires, tokenTypes.RESET_PASSWORD);
+      await tokenService.saveToken(resetPasswordToken, userOne.id, expires, tokenTypes.RESET_PASSWORD);
 
       await request(app).post('/v1/auth/reset-password').query({ token: resetPasswordToken }).expect(httpStatus.BAD_REQUEST);
 
@@ -371,7 +381,7 @@ describe('Auth routes', () => {
 
       expect(sendVerificationEmailSpy).toHaveBeenCalledWith(userOne.email, expect.any(String));
       const verifyEmailToken = sendVerificationEmailSpy.mock.calls[0][1];
-      const dbVerifyEmailToken = await Token.findOne({ token: verifyEmailToken, user: userOne._id });
+      const dbVerifyEmailToken = await prisma.token.findFirst({ where: { token: verifyEmailToken, userId: userOne.id } });
 
       expect(dbVerifyEmailToken).toBeDefined();
     });
@@ -387,8 +397,8 @@ describe('Auth routes', () => {
     test('should return 204 and verify the email', async () => {
       await insertUsers([userOne]);
       const expires = moment().add(config.jwt.verifyEmailExpirationMinutes, 'minutes');
-      const verifyEmailToken = tokenService.generateToken(userOne._id, expires);
-      await tokenService.saveToken(verifyEmailToken, userOne._id, expires, tokenTypes.VERIFY_EMAIL);
+      const verifyEmailToken = tokenService.generateToken(userOne.id, expires);
+      await tokenService.saveToken(verifyEmailToken, userOne.id, expires, tokenTypes.VERIFY_EMAIL);
 
       await request(app)
         .post('/v1/auth/verify-email')
@@ -396,13 +406,12 @@ describe('Auth routes', () => {
         .send()
         .expect(httpStatus.NO_CONTENT);
 
-      const dbUser = await User.findById(userOne._id);
+      const dbUser = await prisma.user.findUnique({ where: { id: userOne.id } });
 
       expect(dbUser.isEmailVerified).toBe(true);
 
-      const dbVerifyEmailToken = await Token.countDocuments({
-        user: userOne._id,
-        type: tokenTypes.VERIFY_EMAIL,
+      const dbVerifyEmailToken = await prisma.token.count({
+        where: { userId: userOne.id, type: tokenTypes.VERIFY_EMAIL },
       });
       expect(dbVerifyEmailToken).toBe(0);
     });
@@ -416,8 +425,8 @@ describe('Auth routes', () => {
     test('should return 401 if verify email token is blacklisted', async () => {
       await insertUsers([userOne]);
       const expires = moment().add(config.jwt.verifyEmailExpirationMinutes, 'minutes');
-      const verifyEmailToken = tokenService.generateToken(userOne._id, expires);
-      await tokenService.saveToken(verifyEmailToken, userOne._id, expires, tokenTypes.VERIFY_EMAIL, true);
+      const verifyEmailToken = tokenService.generateToken(userOne.id, expires);
+      await tokenService.saveToken(verifyEmailToken, userOne.id, expires, tokenTypes.VERIFY_EMAIL, true);
 
       await request(app)
         .post('/v1/auth/verify-email')
@@ -429,8 +438,8 @@ describe('Auth routes', () => {
     test('should return 401 if verify email token is expired', async () => {
       await insertUsers([userOne]);
       const expires = moment().subtract(1, 'minutes');
-      const verifyEmailToken = tokenService.generateToken(userOne._id, expires);
-      await tokenService.saveToken(verifyEmailToken, userOne._id, expires, tokenTypes.VERIFY_EMAIL);
+      const verifyEmailToken = tokenService.generateToken(userOne.id, expires);
+      await tokenService.saveToken(verifyEmailToken, userOne.id, expires, tokenTypes.VERIFY_EMAIL);
 
       await request(app)
         .post('/v1/auth/verify-email')
@@ -440,9 +449,11 @@ describe('Auth routes', () => {
     });
 
     test('should return 401 if user is not found', async () => {
+      await insertUsers([userOne]);
       const expires = moment().add(config.jwt.verifyEmailExpirationMinutes, 'minutes');
-      const verifyEmailToken = tokenService.generateToken(userOne._id, expires);
-      await tokenService.saveToken(verifyEmailToken, userOne._id, expires, tokenTypes.VERIFY_EMAIL);
+      const verifyEmailToken = tokenService.generateToken(userOne.id, expires);
+      await tokenService.saveToken(verifyEmailToken, userOne.id, expires, tokenTypes.VERIFY_EMAIL);
+      await prisma.user.delete({ where: { id: userOne.id } });
 
       await request(app)
         .post('/v1/auth/verify-email')
@@ -462,7 +473,7 @@ describe('Auth middleware', () => {
     await auth()(req, httpMocks.createResponse(), next);
 
     expect(next).toHaveBeenCalledWith();
-    expect(req.user._id).toEqual(userOne._id);
+    expect(req.user.id).toEqual(userOne.id);
   });
 
   test('should call next with unauthorized error if access token is not found in header', async () => {
@@ -494,7 +505,7 @@ describe('Auth middleware', () => {
   test('should call next with unauthorized error if the token is not an access token', async () => {
     await insertUsers([userOne]);
     const expires = moment().add(config.jwt.accessExpirationMinutes, 'minutes');
-    const refreshToken = tokenService.generateToken(userOne._id, expires, tokenTypes.REFRESH);
+    const refreshToken = tokenService.generateToken(userOne.id, expires, tokenTypes.REFRESH);
     const req = httpMocks.createRequest({ headers: { Authorization: `Bearer ${refreshToken}` } });
     const next = jest.fn();
 
@@ -509,7 +520,7 @@ describe('Auth middleware', () => {
   test('should call next with unauthorized error if access token is generated with an invalid secret', async () => {
     await insertUsers([userOne]);
     const expires = moment().add(config.jwt.accessExpirationMinutes, 'minutes');
-    const accessToken = tokenService.generateToken(userOne._id, expires, tokenTypes.ACCESS, 'invalidSecret');
+    const accessToken = tokenService.generateToken(userOne.id, expires, tokenTypes.ACCESS, 'invalidSecret');
     const req = httpMocks.createRequest({ headers: { Authorization: `Bearer ${accessToken}` } });
     const next = jest.fn();
 
@@ -524,7 +535,7 @@ describe('Auth middleware', () => {
   test('should call next with unauthorized error if access token is expired', async () => {
     await insertUsers([userOne]);
     const expires = moment().subtract(1, 'minutes');
-    const accessToken = tokenService.generateToken(userOne._id, expires, tokenTypes.ACCESS);
+    const accessToken = tokenService.generateToken(userOne.id, expires, tokenTypes.ACCESS);
     const req = httpMocks.createRequest({ headers: { Authorization: `Bearer ${accessToken}` } });
     const next = jest.fn();
 
@@ -563,7 +574,7 @@ describe('Auth middleware', () => {
     await insertUsers([userOne]);
     const req = httpMocks.createRequest({
       headers: { Authorization: `Bearer ${userOneAccessToken}` },
-      params: { userId: userOne._id.toHexString() },
+      params: { userId: userOne.id },
     });
     const next = jest.fn();
 
@@ -576,7 +587,7 @@ describe('Auth middleware', () => {
     await insertUsers([admin]);
     const req = httpMocks.createRequest({
       headers: { Authorization: `Bearer ${adminAccessToken}` },
-      params: { userId: userOne._id.toHexString() },
+      params: { userId: userOne.id },
     });
     const next = jest.fn();
 

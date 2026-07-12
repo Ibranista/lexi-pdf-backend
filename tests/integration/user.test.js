@@ -3,7 +3,7 @@ const faker = require('faker');
 const httpStatus = require('http-status');
 const app = require('../../src/app');
 const setupTestDB = require('../utils/setupTestDB');
-const { User } = require('../../src/models');
+const prisma = require('../../src/config/prisma');
 const { userOne, userTwo, admin, insertUsers } = require('../fixtures/user.fixture');
 const { userOneAccessToken, adminAccessToken } = require('../fixtures/token.fixture');
 
@@ -40,7 +40,7 @@ describe('User routes', () => {
         isEmailVerified: false,
       });
 
-      const dbUser = await User.findById(res.body.id);
+      const dbUser = await prisma.user.findUnique({ where: { id: res.body.id } });
       expect(dbUser).toBeDefined();
       expect(dbUser.password).not.toBe(newUser.password);
       expect(dbUser).toMatchObject({ name: newUser.name, email: newUser.email, role: newUser.role, isEmailVerified: false });
@@ -58,7 +58,7 @@ describe('User routes', () => {
 
       expect(res.body.role).toBe('admin');
 
-      const dbUser = await User.findById(res.body.id);
+      const dbUser = await prisma.user.findUnique({ where: { id: res.body.id } });
       expect(dbUser.role).toBe('admin');
     });
 
@@ -159,7 +159,7 @@ describe('User routes', () => {
       });
       expect(res.body.results).toHaveLength(3);
       expect(res.body.results[0]).toEqual({
-        id: userOne._id.toHexString(),
+        id: userOne.id,
         name: userOne.name,
         email: userOne.email,
         role: userOne.role,
@@ -201,7 +201,7 @@ describe('User routes', () => {
         totalResults: 1,
       });
       expect(res.body.results).toHaveLength(1);
-      expect(res.body.results[0].id).toBe(userOne._id.toHexString());
+      expect(res.body.results[0].id).toBe(userOne.id);
     });
 
     test('should correctly apply filter on role field', async () => {
@@ -222,8 +222,8 @@ describe('User routes', () => {
         totalResults: 2,
       });
       expect(res.body.results).toHaveLength(2);
-      expect(res.body.results[0].id).toBe(userOne._id.toHexString());
-      expect(res.body.results[1].id).toBe(userTwo._id.toHexString());
+      expect(res.body.results[0].id).toBe(userOne.id);
+      expect(res.body.results[1].id).toBe(userTwo.id);
     });
 
     test('should correctly sort the returned array if descending sort param is specified', async () => {
@@ -244,9 +244,9 @@ describe('User routes', () => {
         totalResults: 3,
       });
       expect(res.body.results).toHaveLength(3);
-      expect(res.body.results[0].id).toBe(userOne._id.toHexString());
-      expect(res.body.results[1].id).toBe(userTwo._id.toHexString());
-      expect(res.body.results[2].id).toBe(admin._id.toHexString());
+      expect(res.body.results[0].id).toBe(userOne.id);
+      expect(res.body.results[1].id).toBe(userTwo.id);
+      expect(res.body.results[2].id).toBe(admin.id);
     });
 
     test('should correctly sort the returned array if ascending sort param is specified', async () => {
@@ -267,9 +267,9 @@ describe('User routes', () => {
         totalResults: 3,
       });
       expect(res.body.results).toHaveLength(3);
-      expect(res.body.results[0].id).toBe(admin._id.toHexString());
-      expect(res.body.results[1].id).toBe(userOne._id.toHexString());
-      expect(res.body.results[2].id).toBe(userTwo._id.toHexString());
+      expect(res.body.results[0].id).toBe(admin.id);
+      expect(res.body.results[1].id).toBe(userOne.id);
+      expect(res.body.results[2].id).toBe(userTwo.id);
     });
 
     test('should correctly sort the returned array if multiple sorting criteria are specified', async () => {
@@ -302,7 +302,7 @@ describe('User routes', () => {
       });
 
       expectedOrder.forEach((user, index) => {
-        expect(res.body.results[index].id).toBe(user._id.toHexString());
+        expect(res.body.results[index].id).toBe(user.id);
       });
     });
 
@@ -324,8 +324,8 @@ describe('User routes', () => {
         totalResults: 3,
       });
       expect(res.body.results).toHaveLength(2);
-      expect(res.body.results[0].id).toBe(userOne._id.toHexString());
-      expect(res.body.results[1].id).toBe(userTwo._id.toHexString());
+      expect(res.body.results[0].id).toBe(userOne.id);
+      expect(res.body.results[1].id).toBe(userTwo.id);
     });
 
     test('should return the correct page if page and limit params are specified', async () => {
@@ -346,7 +346,7 @@ describe('User routes', () => {
         totalResults: 3,
       });
       expect(res.body.results).toHaveLength(1);
-      expect(res.body.results[0].id).toBe(admin._id.toHexString());
+      expect(res.body.results[0].id).toBe(admin.id);
     });
   });
 
@@ -355,14 +355,14 @@ describe('User routes', () => {
       await insertUsers([userOne]);
 
       const res = await request(app)
-        .get(`/v1/users/${userOne._id}`)
+        .get(`/v1/users/${userOne.id}`)
         .set('Authorization', `Bearer ${userOneAccessToken}`)
         .send()
         .expect(httpStatus.OK);
 
       expect(res.body).not.toHaveProperty('password');
       expect(res.body).toEqual({
-        id: userOne._id.toHexString(),
+        id: userOne.id,
         email: userOne.email,
         name: userOne.name,
         role: userOne.role,
@@ -373,14 +373,14 @@ describe('User routes', () => {
     test('should return 401 error if access token is missing', async () => {
       await insertUsers([userOne]);
 
-      await request(app).get(`/v1/users/${userOne._id}`).send().expect(httpStatus.UNAUTHORIZED);
+      await request(app).get(`/v1/users/${userOne.id}`).send().expect(httpStatus.UNAUTHORIZED);
     });
 
     test('should return 403 error if user is trying to get another user', async () => {
       await insertUsers([userOne, userTwo]);
 
       await request(app)
-        .get(`/v1/users/${userTwo._id}`)
+        .get(`/v1/users/${userTwo.id}`)
         .set('Authorization', `Bearer ${userOneAccessToken}`)
         .send()
         .expect(httpStatus.FORBIDDEN);
@@ -390,13 +390,13 @@ describe('User routes', () => {
       await insertUsers([userOne, admin]);
 
       await request(app)
-        .get(`/v1/users/${userOne._id}`)
+        .get(`/v1/users/${userOne.id}`)
         .set('Authorization', `Bearer ${adminAccessToken}`)
         .send()
         .expect(httpStatus.OK);
     });
 
-    test('should return 400 error if userId is not a valid mongo id', async () => {
+    test('should return 400 error if userId is not a valid id', async () => {
       await insertUsers([admin]);
 
       await request(app)
@@ -410,7 +410,7 @@ describe('User routes', () => {
       await insertUsers([admin]);
 
       await request(app)
-        .get(`/v1/users/${userOne._id}`)
+        .get(`/v1/users/${userOne.id}`)
         .set('Authorization', `Bearer ${adminAccessToken}`)
         .send()
         .expect(httpStatus.NOT_FOUND);
@@ -422,26 +422,26 @@ describe('User routes', () => {
       await insertUsers([userOne]);
 
       await request(app)
-        .delete(`/v1/users/${userOne._id}`)
+        .delete(`/v1/users/${userOne.id}`)
         .set('Authorization', `Bearer ${userOneAccessToken}`)
         .send()
         .expect(httpStatus.NO_CONTENT);
 
-      const dbUser = await User.findById(userOne._id);
+      const dbUser = await prisma.user.findUnique({ where: { id: userOne.id } });
       expect(dbUser).toBeNull();
     });
 
     test('should return 401 error if access token is missing', async () => {
       await insertUsers([userOne]);
 
-      await request(app).delete(`/v1/users/${userOne._id}`).send().expect(httpStatus.UNAUTHORIZED);
+      await request(app).delete(`/v1/users/${userOne.id}`).send().expect(httpStatus.UNAUTHORIZED);
     });
 
     test('should return 403 error if user is trying to delete another user', async () => {
       await insertUsers([userOne, userTwo]);
 
       await request(app)
-        .delete(`/v1/users/${userTwo._id}`)
+        .delete(`/v1/users/${userTwo.id}`)
         .set('Authorization', `Bearer ${userOneAccessToken}`)
         .send()
         .expect(httpStatus.FORBIDDEN);
@@ -451,13 +451,13 @@ describe('User routes', () => {
       await insertUsers([userOne, admin]);
 
       await request(app)
-        .delete(`/v1/users/${userOne._id}`)
+        .delete(`/v1/users/${userOne.id}`)
         .set('Authorization', `Bearer ${adminAccessToken}`)
         .send()
         .expect(httpStatus.NO_CONTENT);
     });
 
-    test('should return 400 error if userId is not a valid mongo id', async () => {
+    test('should return 400 error if userId is not a valid id', async () => {
       await insertUsers([admin]);
 
       await request(app)
@@ -471,7 +471,7 @@ describe('User routes', () => {
       await insertUsers([admin]);
 
       await request(app)
-        .delete(`/v1/users/${userOne._id}`)
+        .delete(`/v1/users/${userOne.id}`)
         .set('Authorization', `Bearer ${adminAccessToken}`)
         .send()
         .expect(httpStatus.NOT_FOUND);
@@ -488,21 +488,21 @@ describe('User routes', () => {
       };
 
       const res = await request(app)
-        .patch(`/v1/users/${userOne._id}`)
+        .patch(`/v1/users/${userOne.id}`)
         .set('Authorization', `Bearer ${userOneAccessToken}`)
         .send(updateBody)
         .expect(httpStatus.OK);
 
       expect(res.body).not.toHaveProperty('password');
       expect(res.body).toEqual({
-        id: userOne._id.toHexString(),
+        id: userOne.id,
         name: updateBody.name,
         email: updateBody.email,
         role: 'user',
         isEmailVerified: false,
       });
 
-      const dbUser = await User.findById(userOne._id);
+      const dbUser = await prisma.user.findUnique({ where: { id: userOne.id } });
       expect(dbUser).toBeDefined();
       expect(dbUser.password).not.toBe(updateBody.password);
       expect(dbUser).toMatchObject({ name: updateBody.name, email: updateBody.email, role: 'user' });
@@ -512,7 +512,7 @@ describe('User routes', () => {
       await insertUsers([userOne]);
       const updateBody = { name: faker.name.findName() };
 
-      await request(app).patch(`/v1/users/${userOne._id}`).send(updateBody).expect(httpStatus.UNAUTHORIZED);
+      await request(app).patch(`/v1/users/${userOne.id}`).send(updateBody).expect(httpStatus.UNAUTHORIZED);
     });
 
     test('should return 403 if user is updating another user', async () => {
@@ -520,7 +520,7 @@ describe('User routes', () => {
       const updateBody = { name: faker.name.findName() };
 
       await request(app)
-        .patch(`/v1/users/${userTwo._id}`)
+        .patch(`/v1/users/${userTwo.id}`)
         .set('Authorization', `Bearer ${userOneAccessToken}`)
         .send(updateBody)
         .expect(httpStatus.FORBIDDEN);
@@ -531,7 +531,7 @@ describe('User routes', () => {
       const updateBody = { name: faker.name.findName() };
 
       await request(app)
-        .patch(`/v1/users/${userOne._id}`)
+        .patch(`/v1/users/${userOne.id}`)
         .set('Authorization', `Bearer ${adminAccessToken}`)
         .send(updateBody)
         .expect(httpStatus.OK);
@@ -542,13 +542,13 @@ describe('User routes', () => {
       const updateBody = { name: faker.name.findName() };
 
       await request(app)
-        .patch(`/v1/users/${userOne._id}`)
+        .patch(`/v1/users/${userOne.id}`)
         .set('Authorization', `Bearer ${adminAccessToken}`)
         .send(updateBody)
         .expect(httpStatus.NOT_FOUND);
     });
 
-    test('should return 400 error if userId is not a valid mongo id', async () => {
+    test('should return 400 error if userId is not a valid id', async () => {
       await insertUsers([admin]);
       const updateBody = { name: faker.name.findName() };
 
@@ -564,7 +564,7 @@ describe('User routes', () => {
       const updateBody = { email: 'invalidEmail' };
 
       await request(app)
-        .patch(`/v1/users/${userOne._id}`)
+        .patch(`/v1/users/${userOne.id}`)
         .set('Authorization', `Bearer ${userOneAccessToken}`)
         .send(updateBody)
         .expect(httpStatus.BAD_REQUEST);
@@ -575,7 +575,7 @@ describe('User routes', () => {
       const updateBody = { email: userTwo.email };
 
       await request(app)
-        .patch(`/v1/users/${userOne._id}`)
+        .patch(`/v1/users/${userOne.id}`)
         .set('Authorization', `Bearer ${userOneAccessToken}`)
         .send(updateBody)
         .expect(httpStatus.BAD_REQUEST);
@@ -586,7 +586,7 @@ describe('User routes', () => {
       const updateBody = { email: userOne.email };
 
       await request(app)
-        .patch(`/v1/users/${userOne._id}`)
+        .patch(`/v1/users/${userOne.id}`)
         .set('Authorization', `Bearer ${userOneAccessToken}`)
         .send(updateBody)
         .expect(httpStatus.OK);
@@ -597,7 +597,7 @@ describe('User routes', () => {
       const updateBody = { password: 'passwo1' };
 
       await request(app)
-        .patch(`/v1/users/${userOne._id}`)
+        .patch(`/v1/users/${userOne.id}`)
         .set('Authorization', `Bearer ${userOneAccessToken}`)
         .send(updateBody)
         .expect(httpStatus.BAD_REQUEST);
@@ -608,7 +608,7 @@ describe('User routes', () => {
       const updateBody = { password: 'password' };
 
       await request(app)
-        .patch(`/v1/users/${userOne._id}`)
+        .patch(`/v1/users/${userOne.id}`)
         .set('Authorization', `Bearer ${userOneAccessToken}`)
         .send(updateBody)
         .expect(httpStatus.BAD_REQUEST);
@@ -616,7 +616,7 @@ describe('User routes', () => {
       updateBody.password = '11111111';
 
       await request(app)
-        .patch(`/v1/users/${userOne._id}`)
+        .patch(`/v1/users/${userOne.id}`)
         .set('Authorization', `Bearer ${userOneAccessToken}`)
         .send(updateBody)
         .expect(httpStatus.BAD_REQUEST);

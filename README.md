@@ -4,7 +4,7 @@
 [![Coverage Status](https://coveralls.io/repos/github/hagopj13/node-express-boilerplate/badge.svg?branch=master)](https://coveralls.io/github/hagopj13/node-express-boilerplate?branch=master)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat-square)](http://makeapullrequest.com)
 
-A boilerplate/starter project for quickly building RESTful APIs using Node.js, Express, and Mongoose.
+A boilerplate/starter project for quickly building RESTful APIs using Node.js, Express, and Prisma.
 
 By running a single command, you will get a production-ready Node.js app installed and fully configured on your machine. The app comes with many built-in features, such as authentication using JWT, request validation, unit and integration tests, continuous integration, docker support, API documentation, pagination, etc. For more details, check the features list below.
 
@@ -60,13 +60,13 @@ cp .env.example .env
 - [Authentication](#authentication)
 - [Authorization](#authorization)
 - [Logging](#logging)
-- [Custom Mongoose Plugins](#custom-mongoose-plugins)
+- [Prisma & Utils](#prisma--utils)
 - [Linting](#linting)
 - [Contributing](#contributing)
 
 ## Features
 
-- **NoSQL database**: [MongoDB](https://www.mongodb.com) object data modeling using [Mongoose](https://mongoosejs.com)
+- **SQL database**: [PostgreSQL](https://www.postgresql.org) object-relational mapping using [Prisma](https://www.prisma.io)
 - **Authentication and authorization**: using [passport](http://www.passportjs.org)
 - **Validation**: request data validation using [Joi](https://github.com/hapijs/joi)
 - **Logging**: using [winston](https://github.com/winstonjs/winston) and [morgan](https://github.com/expressjs/morgan)
@@ -152,8 +152,8 @@ The environment variables can be found and modified in the `.env` file. They com
 # Port number
 PORT=3000
 
-# URL of the Mongo DB
-MONGODB_URL=mongodb://127.0.0.1:27017/node-boilerplate
+# URL of the PostgreSQL DB
+DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/node-boilerplate?schema=public
 
 # JWT
 # JWT secret key
@@ -175,12 +175,13 @@ EMAIL_FROM=support@yourapp.com
 ## Project Structure
 
 ```
+prisma\
+ |--schema.prisma   # Prisma schema (data layer)
 src\
  |--config\         # Environment variables and configuration related things
  |--controllers\    # Route controllers (controller layer)
  |--docs\           # Swagger files
  |--middlewares\    # Custom express middlewares
- |--models\         # Mongoose models (data layer)
  |--routes\         # Routes
  |--services\       # Business logic (service layer)
  |--utils\          # Utility classes and functions
@@ -346,48 +347,35 @@ This app uses pm2 in production mode, which is already configured to store the l
 
 Note: API request information (request url, response code, timestamp, etc.) are also automatically logged (using [morgan](https://github.com/expressjs/morgan)).
 
-## Custom Mongoose Plugins
+## Prisma & Utils
 
-The app also contains 2 custom mongoose plugins that you can attach to any mongoose model schema. You can find the plugins in `src/models/plugins`.
+The app uses [Prisma](https://www.prisma.io) as its ORM. The schema lives in `prisma/schema.prisma`, and a single shared client instance is exported from `src/config/prisma.js`. Two small utils in `src/utils` fill in for what Mongoose plugins used to do:
+
+### exclude
+
+`src/utils/exclude.js` strips fields (like `password`) from a Prisma record before it's sent in a response, since Prisma returns plain objects with no `toJSON` hook to do this automatically.
 
 ```javascript
-const mongoose = require('mongoose');
-const { toJSON, paginate } = require('./plugins');
+const exclude = require('../utils/exclude');
 
-const userSchema = mongoose.Schema(
-  {
-    /* schema definition here */
-  },
-  { timestamps: true }
-);
-
-userSchema.plugin(toJSON);
-userSchema.plugin(paginate);
-
-const User = mongoose.model('User', userSchema);
+const user = await prisma.user.findUnique({ where: { id } });
+res.send(exclude(user, ['password']));
 ```
-
-### toJSON
-
-The toJSON plugin applies the following changes in the toJSON transform call:
-
-- removes \_\_v, createdAt, updatedAt, and any schema path that has private: true
-- replaces \_id with id
 
 ### paginate
 
-The paginate plugin adds the `paginate` static method to the mongoose schema.
-
-Adding this plugin to the `User` model schema will allow you to do the following:
+`src/utils/paginate.js` wraps any Prisma model delegate with pagination:
 
 ```javascript
+const paginate = require('../utils/paginate');
+
 const queryUsers = async (filter, options) => {
-  const users = await User.paginate(filter, options);
+  const users = await paginate(prisma.user, filter, options);
   return users;
 };
 ```
 
-The `filter` param is a regular mongo filter.
+The `filter` param is a regular Prisma `where` filter.
 
 The `options` param can have the following (optional) fields:
 

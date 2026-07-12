@@ -3,13 +3,13 @@ const moment = require('moment');
 const httpStatus = require('http-status');
 const config = require('../config/config');
 const userService = require('./user.service');
-const { Token } = require('../models');
+const prisma = require('../config/prisma');
 const ApiError = require('../utils/ApiError');
 const { tokenTypes } = require('../config/tokens');
 
 /**
  * Generate token
- * @param {ObjectId} userId
+ * @param {string} userId
  * @param {Moment} expires
  * @param {string} type
  * @param {string} [secret]
@@ -28,19 +28,21 @@ const generateToken = (userId, expires, type, secret = config.jwt.secret) => {
 /**
  * Save a token
  * @param {string} token
- * @param {ObjectId} userId
+ * @param {string} userId
  * @param {Moment} expires
  * @param {string} type
  * @param {boolean} [blacklisted]
  * @returns {Promise<Token>}
  */
 const saveToken = async (token, userId, expires, type, blacklisted = false) => {
-  const tokenDoc = await Token.create({
-    token,
-    user: userId,
-    expires: expires.toDate(),
-    type,
-    blacklisted,
+  const tokenDoc = await prisma.token.create({
+    data: {
+      token,
+      userId,
+      expires: expires.toDate(),
+      type,
+      blacklisted,
+    },
   });
   return tokenDoc;
 };
@@ -53,7 +55,7 @@ const saveToken = async (token, userId, expires, type, blacklisted = false) => {
  */
 const verifyToken = async (token, type) => {
   const payload = jwt.verify(token, config.jwt.secret);
-  const tokenDoc = await Token.findOne({ token, type, user: payload.sub, blacklisted: false });
+  const tokenDoc = await prisma.token.findFirst({ where: { token, type, userId: payload.sub, blacklisted: false } });
   if (!tokenDoc) {
     throw new Error('Token not found');
   }
