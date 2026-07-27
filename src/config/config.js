@@ -23,6 +23,22 @@ const envVarsSchema = Joi.object()
     SMTP_USERNAME: Joi.string().description('username for email server'),
     SMTP_PASSWORD: Joi.string().description('password for email server'),
     EMAIL_FROM: Joi.string().description('the from field in the emails sent by the app'),
+    PUBLIC_URL: Joi.string().uri().default('http://localhost:3000').description('public origin of this API'),
+    OPENAI_API_KEY: Joi.string().allow('').default('').description('OpenAI key used by the LangChain models'),
+    OPENAI_MODEL: Joi.string().default('gpt-4o-mini').description('chat model for translate and Lexi'),
+    OPENAI_TTS_MODEL: Joi.string().default('gpt-4o-mini-tts').description('speech model for /ai/tts'),
+    TTS_LANGS: Joi.string().default('en,ar').description('languages a TTS voice exists for'),
+    GOOGLE_CLIENT_ID: Joi.string()
+      .allow('')
+      .default('')
+      .description('comma-separated Google client ids an id token may be addressed to'),
+    AI_QUOTA_ANONYMOUS: Joi.number().default(10).description('AI requests granted to an anonymous user, non-renewing'),
+    AI_QUOTA_FREE: Joi.number().default(30).description('AI requests per month for a signed-in free user'),
+    AI_QUOTA_PRO: Joi.number().default(1000).description('AI requests per month for a pro user'),
+    SYNC_MAX_PAYLOAD_BYTES: Joi.number()
+      .default(2 * 1024 * 1024)
+      .description('reject larger /sync bodies with 413'),
+    SYNC_TOMBSTONE_DAYS: Joi.number().default(90).description('days a deleted row is kept before purging'),
   })
   .unknown();
 
@@ -65,5 +81,30 @@ module.exports = {
       },
     },
     from: envVars.EMAIL_FROM,
+  },
+  publicUrl: envVars.PUBLIC_URL.replace(/\/$/, ''),
+  openai: {
+    apiKey: envVars.OPENAI_API_KEY,
+    model: envVars.OPENAI_MODEL,
+    ttsModel: envVars.OPENAI_TTS_MODEL,
+    ttsLangs: envVars.TTS_LANGS.split(',')
+      .map((lang) => lang.trim())
+      .filter(Boolean),
+  },
+  google: {
+    clientIds: envVars.GOOGLE_CLIENT_ID.split(',')
+      .map((id) => id.trim())
+      .filter(Boolean),
+  },
+  ai: {
+    quota: {
+      anonymous: envVars.AI_QUOTA_ANONYMOUS,
+      free: envVars.AI_QUOTA_FREE,
+      pro: envVars.AI_QUOTA_PRO,
+    },
+  },
+  sync: {
+    maxPayloadBytes: envVars.SYNC_MAX_PAYLOAD_BYTES,
+    tombstoneDays: envVars.SYNC_TOMBSTONE_DAYS,
   },
 };

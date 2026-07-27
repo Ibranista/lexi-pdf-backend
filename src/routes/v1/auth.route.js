@@ -15,6 +15,12 @@ router.post('/reset-password', validate(authValidation.resetPassword), authContr
 router.post('/send-verification-email', auth(), authController.sendVerificationEmail);
 router.post('/verify-email', validate(authValidation.verifyEmail), authController.verifyEmail);
 
+// anonymous-first identity (spec §1)
+router.post('/device', validate(authValidation.device), authController.device);
+router.post('/google', validate(authValidation.linkGoogle), authController.googleLogin);
+router.post('/link/email', auth(), validate(authValidation.linkEmail), authController.linkEmail);
+router.post('/link/google', auth(), validate(authValidation.linkGoogle), authController.linkGoogle);
+
 module.exports = router;
 
 /**
@@ -288,4 +294,156 @@ module.exports = router;
  *             example:
  *               code: 401
  *               message: verify email failed
+ */
+
+/**
+ * @swagger
+ * /auth/device:
+ *   post:
+ *     summary: Register a device and get an anonymous session
+ *     description: |
+ *       Every install gets a real user row from the start, so highlights, notes,
+ *       bookmarks, vocabulary and recents work before there is an account and survive
+ *       signing in. Idempotent on `deviceId`: the same device gets the same anonymous
+ *       user back with fresh tokens, which is how the app recovers a lost refresh token.
+ *       A device still attached to a full account — linked, then signed out — is detached
+ *       and gets a fresh, empty anonymous user instead.
+ *     tags: [Auth]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [deviceId, platform]
+ *             properties:
+ *               deviceId:
+ *                 type: string
+ *                 format: uuid
+ *               platform:
+ *                 type: string
+ *                 enum: [ios, android, web]
+ *               model:
+ *                 type: string
+ *               osVersion:
+ *                 type: string
+ *               appVersion:
+ *                 type: string
+ *               locale:
+ *                 type: string
+ *             example:
+ *               deviceId: a2f1c0de-1f47-4a1a-9a2b-9f0b0d3c8e11
+ *               platform: android
+ *               model: SM-S901E
+ *               osVersion: "15"
+ *               appVersion: 1.0.0
+ *               locale: en-US
+ *     responses:
+ *       "200":
+ *         description: OK
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 user:
+ *                   $ref: '#/components/schemas/User'
+ *                 tokens:
+ *                   $ref: '#/components/schemas/AuthTokens'
+ */
+
+/**
+ * @swagger
+ * /auth/link/email:
+ *   post:
+ *     summary: Turn the caller's anonymous session into an email account
+ *     description: |
+ *       There is no data-migration endpoint: the anonymous user row becomes the real one,
+ *       so nothing has to move. Returns newly issued tokens; the client replaces both.
+ *     tags: [Auth]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [email, password, name]
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 format: email
+ *               password:
+ *                 type: string
+ *                 format: password
+ *               name:
+ *                 type: string
+ *     responses:
+ *       "200":
+ *         description: OK
+ *       "409":
+ *         description: |
+ *           `ACCOUNT_EXISTS` — sign in to that account and call POST /sync/merge.
+ *           `ALREADY_LINKED` — the caller is already a full account.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *             example:
+ *               code: 409
+ *               reason: ACCOUNT_EXISTS
+ *               message: That email is already registered.
+ */
+
+/**
+ * @swagger
+ * /auth/link/google:
+ *   post:
+ *     summary: Turn the caller's anonymous session into a Google account
+ *     tags: [Auth]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [idToken]
+ *             properties:
+ *               idToken:
+ *                 type: string
+ *                 description: From @react-native-google-signin/google-signin
+ *     responses:
+ *       "200":
+ *         description: OK
+ *       "409":
+ *         description: ACCOUNT_EXISTS or ALREADY_LINKED
+ *       "503":
+ *         description: GOOGLE_NOT_CONFIGURED — no GOOGLE_CLIENT_ID on this server
+ */
+
+/**
+ * @swagger
+ * /auth/google:
+ *   post:
+ *     summary: Sign in to the account that already owns this Google identity
+ *     description: The step before POST /sync/merge when linking hit ACCOUNT_EXISTS.
+ *     tags: [Auth]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [idToken]
+ *             properties:
+ *               idToken:
+ *                 type: string
+ *     responses:
+ *       "200":
+ *         description: OK
+ *       "404":
+ *         description: NO_SUCH_ACCOUNT
  */

@@ -1,6 +1,9 @@
 const express = require('express');
 const authRoute = require('./auth.route');
 const userRoute = require('./user.route');
+const syncRoute = require('./sync.route');
+const aiRoute = require('./ai.route');
+const suggestionRoute = require('./suggestion.route');
 const docsRoute = require('./docs.route');
 const config = require('../../config/config');
 
@@ -14,6 +17,18 @@ const defaultRoutes = [
   {
     path: '/users',
     route: userRoute,
+  },
+  {
+    path: '/sync',
+    route: syncRoute,
+  },
+  {
+    path: '/ai',
+    route: aiRoute,
+  },
+  {
+    path: '/book-suggestions',
+    route: suggestionRoute,
   },
 ];
 

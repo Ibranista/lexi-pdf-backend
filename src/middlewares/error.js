@@ -30,6 +30,10 @@ const errorHandler = (err, req, res, next) => {
   const response = {
     code: statusCode,
     message,
+    // `reason`, `quota`, `requiresAuth` … — the stable machine fields the
+    // client branches on. Suppressed with the message on non-operational
+    // errors in production.
+    ...(err.details && (config.env !== 'production' || err.isOperational) && err.details),
     ...(config.env === 'development' && { stack: err.stack }),
   };
 

@@ -10,41 +10,54 @@ datasource db {
   extensions = [pgvector(map: "vector")]
 }
 
-// ── IDENTITY & SYNC ──────────────────────────────────────────────
+// ── IDENTITY ─────────────────────────────────────────────────────
+// Every install gets a real (anonymous) user row from the start, so
+// highlights/notes/vocab work before there is an account and survive
+// sign-in without a migration step. See spec §1.
 
 model User {
-  id              String   @id @default(uuid())
-  name            String
-  display_name    String?  @unique
-  reading_level   String?
-  email           String   @unique
-  password        String
-  role            String   @default("user")
-  isEmailVerified Boolean  @default(false)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id String @id @default(uuid())
 
-  tokens           Token[]
-  devices          Devices[]
-  documents        Document[]
-  collections      Collection[]
-  reading_progress ReadingProgress[]
-  focus_sessions   FocusSession[]
-  highlights       Highlight[]
-  notes            Note[]
-  conversations    Conversation[]
-  messages         Message[]
-  review_cards     ReviewCard[]
-  ai_jobs          AiJob[]
+  name String @default("")
+  // null for anonymous users — the API renders them as "". Postgres allows
+  // many NULLs under a unique index, which is what makes this work.
+  email           String? @unique
+  password        String?
+  googleId        String? @unique
+  role            String  @default("user")
+  isEmailVerified Boolean @default(false)
+  isAnonymous     Boolean @default(false)
+
+  // AI budget (spec §4). Counted per user, in requests, never per device.
+  aiTier     String    @default("anonymous")
+  aiUsed     Int       @default(0)
+  aiResetsAt DateTime? @db.Timestamptz
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tokens      Token[]
+  devices     Device[]
+  documents   Document[]
+  annotations Annotation[]
+  vocab       VocabEntry[]
+  chats       ChatSession[]
+  indexes     DocumentIndex[]
 }
 
-model Devices {
-  device_id      String    @id @default(uuid())
-  userId         String
-  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  name           String?
-  platform       String?
-  last_synced_at DateTime? @db.Timestamptz
+model Device {
+  // client-generated UUID v4 kept in expo-secure-store; not an OS identifier
+  deviceId     String    @id
+  userId       String
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  platform     String?
+  model        String?
+  osVersion    String?
+  appVersion   String?
+  locale       String?
+  lastSyncedAt DateTime? @db.Timestamptz
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 
   @@index([userId])
 }
@@ -63,268 +76,131 @@ model Token {
   @@index([token])
 }
 
-// ── LIBRARY ──────────────────────────────────────────────────────
+// ── SYNC ─────────────────────────────────────────────────────────
+// Shapes mirror the client stores (spec §2.2). Two clocks on every row:
+//   updatedAt       — the client's, the only input to last-write-wins
+//   serverUpdatedAt — ours, the only input to the pull cursor
+// Keeping them apart means a device with a skewed clock can lose a merge
+// but can never make rows invisible to the other devices.
 
 model Document {
-  id              String   @id @default(uuid())
-  owner_id        String
-  owner           User     @relation(fields: [owner_id], references: [id], onDelete: Cascade)
-  title           String
-  author          String?
-  storage_key     String
-  page_count      Int
-  file_size_bytes BigInt
-  imported_at     DateTime @default(now()) @db.Timestamptz
+  id                  String    @id @default(uuid())
+  userId              String
+  user                User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  docKey              String
+  uri                 String
+  name                String
+  ext                 String    @default("PDF")
+  openedAt            DateTime  @db.Timestamptz
+  page                Int       @default(0)
+  pageCount           Int?
+  bookmarks           Int[]     @default([])
+  readingPlanMs       Int[]     @default([])
+  readingTimeMsByPage Json?
+  collections         String[]  @default([])
+  updatedAt           DateTime  @db.Timestamptz
+  deletedAt           DateTime? @db.Timestamptz
 
-  collection_documents CollectionDocument[]
-  reading_progress     ReadingProgress[]
-  focus_sessions       FocusSession[]
-  highlights           Highlight[]
-  notes                Note[]
-  ai_summaries         AiSummary[]
-  ai_explanations      AiExplanation[]
-  conversations        Conversation[]
-  review_cards         ReviewCard[]
-  ai_jobs              AiJob[]
-  document_chunks      DocumentChunk[]
+  serverUpdatedAt DateTime @updatedAt @db.Timestamptz
+  lastDeviceId    String?
 
-  @@index([owner_id])
+  @@unique([userId, docKey])
+  @@index([userId, serverUpdatedAt])
 }
 
-model Collection {
-  id         String   @id @default(uuid())
-  owner_id   String
-  owner      User     @relation(fields: [owner_id], references: [id], onDelete: Cascade)
-  name       String
-  color      String?
-  sort_order Int
-  created_at DateTime @default(now()) @db.Timestamptz
+model Annotation {
+  // client-generated (`Date.now().toString(36)-seq`); accepted as given
+  id        String    @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  docKey    String
+  page      Int
+  text      String
+  source    String?
+  color     String
+  note      String    @default("")
+  createdAt DateTime  @db.Timestamptz
+  updatedAt DateTime  @db.Timestamptz
+  deletedAt DateTime? @db.Timestamptz
 
-  collection_documents CollectionDocument[]
+  serverUpdatedAt DateTime @updatedAt @db.Timestamptz
+  lastDeviceId    String?
 
-  @@index([owner_id])
+  @@id([userId, id])
+  @@index([userId, serverUpdatedAt])
+  @@index([userId, docKey])
 }
 
-model CollectionDocument {
-  collection_id String
-  collection    Collection @relation(fields: [collection_id], references: [id], onDelete: Cascade)
-  document_id   String
-  document      Document   @relation(fields: [document_id], references: [id], onDelete: Cascade)
-  added_at      DateTime   @default(now()) @db.Timestamptz
+model VocabEntry {
+  id        String    @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  docKey    String
+  word      String
+  pos       String?
+  tr        String
+  translit  String?
+  lang      String
+  p         Int?
+  s1        String?
+  s2        String?
+  createdAt DateTime  @db.Timestamptz
+  updatedAt DateTime  @db.Timestamptz
+  deletedAt DateTime? @db.Timestamptz
 
-  @@id([collection_id, document_id])
-  @@index([document_id])
+  serverUpdatedAt DateTime @updatedAt @db.Timestamptz
+  lastDeviceId    String?
+
+  @@id([userId, id])
+  @@index([userId, serverUpdatedAt])
+  @@index([userId, docKey])
 }
 
-// ── READING ──────────────────────────────────────────────────────
+// ── AI ───────────────────────────────────────────────────────────
 
-model ReadingProgress {
-  user_id         String
-  user            User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
-  document_id     String
-  document        Document @relation(fields: [document_id], references: [id], onDelete: Cascade)
-  current_page    Int
-  scroll_offset   Float
-  context_snippet String? // powers Smart Return
-  last_read_at    DateTime @default(now()) @db.Timestamptz
+model ChatSession {
+  // client-generated per document and reused; scoped by user so one client
+  // cannot read another's history by guessing a session id
+  id        String   @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  docKey    String
+  title     String?
+  createdAt DateTime @default(now()) @db.Timestamptz
+  updatedAt DateTime @updatedAt @db.Timestamptz
 
-  @@id([user_id, document_id])
-  @@index([document_id])
+  messages ChatMessage[]
+
+  @@id([userId, id])
+  @@index([userId, docKey])
 }
 
-model FocusSession {
-  id          String    @id @default(uuid())
-  user_id     String
-  user        User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
-  document_id String
-  document    Document  @relation(fields: [document_id], references: [id], onDelete: Cascade)
-  started_at  DateTime  @default(now()) @db.Timestamptz
-  ended_at    DateTime? @db.Timestamptz
-  pages_read  Int?
+model ChatMessage {
+  id        String      @id @default(uuid())
+  userId    String
+  sessionId String
+  session   ChatSession @relation(fields: [userId, sessionId], references: [userId, id], onDelete: Cascade)
+  role      String // user | assistant
+  content   String
+  kind      String? // normal | drift | recap
+  page      Int?
+  createdAt DateTime    @default(now()) @db.Timestamptz
 
-  @@index([user_id])
-  @@index([document_id])
+  @@index([userId, sessionId, createdAt])
 }
 
-// ── ANNOTATIONS ──────────────────────────────────────────────────
+// Counts only — /ai/context is accepted and acknowledged but book text is
+// not stored in v1 (spec §7.2). Swap `pagesIndexed` for real chunks when
+// cross-chapter recall becomes the complaint.
+model DocumentIndex {
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  docKey       String
+  title        String?
+  author       String?
+  pageCount    Int?
+  pagesIndexed Int      @default(0)
+  updatedAt    DateTime @updatedAt @db.Timestamptz
 
-model Highlight {
-  id          String   @id @default(uuid())
-  document_id String
-  document    Document @relation(fields: [document_id], references: [id], onDelete: Cascade)
-  user_id     String
-  user        User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
-  page_number Int
-  color       String
-  quoted_text String
-  position    Json // jsonb text rects — survive re-render at any zoom
-  created_at  DateTime @default(now()) @db.Timestamptz
-
-  notes        Note[]
-  review_cards ReviewCard[]
-
-  @@index([document_id])
-  @@index([user_id])
-}
-
-model Note {
-  id           String     @id @default(uuid())
-  document_id  String
-  document     Document   @relation(fields: [document_id], references: [id], onDelete: Cascade)
-  highlight_id String?
-  highlight    Highlight? @relation(fields: [highlight_id], references: [id], onDelete: Cascade)
-  user_id      String
-  user         User       @relation(fields: [user_id], references: [id], onDelete: Cascade)
-  page_number  Int
-  body         String
-  created_at   DateTime   @default(now()) @db.Timestamptz
-  updated_at   DateTime   @updatedAt @db.Timestamptz
-
-  @@index([document_id])
-  @@index([highlight_id])
-  @@index([user_id])
-}
-
-// ── AI COMPANION · PRO ───────────────────────────────────────────
-
-model AiSummary {
-  id          String   @id @default(uuid())
-  document_id String
-  document    Document @relation(fields: [document_id], references: [id], onDelete: Cascade)
-  scope       String // page | chapter | doc
-  page_from   Int?
-  page_to     Int?
-  content     String
-  model       String?
-  created_at  DateTime @default(now()) @db.Timestamptz
-
-  @@index([document_id])
-}
-
-model AiExplanation {
-  id            String   @id @default(uuid())
-  document_id   String
-  document      Document @relation(fields: [document_id], references: [id], onDelete: Cascade)
-  page_number   Int
-  source_text   String // selection
-  explanation   String
-  reading_level String?
-  created_at    DateTime @default(now()) @db.Timestamptz
-
-  @@index([document_id])
-}
-
-// ── ASK YOUR DOCUMENT · PRO ──────────────────────────────────────
-
-model Conversation {
-  id          String   @id @default(uuid())
-  document_id String
-  document    Document @relation(fields: [document_id], references: [id], onDelete: Cascade)
-  user_id     String
-  user        User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
-  title       String?
-  created_at  DateTime @default(now()) @db.Timestamptz
-
-  messages Message[]
-
-  @@index([document_id])
-  @@index([user_id])
-}
-
-// ── MESSAGES ─────────────────────────────────────────────────────
-
-model Message {
-  id              String       @id @default(uuid())
-  conversation_id String
-  conversation    Conversation @relation(fields: [conversation_id], references: [id], onDelete: Cascade)
-  user_id         String
-  user            User         @relation(fields: [user_id], references: [id], onDelete: Cascade)
-  role            String // user | assistant
-  content         String
-  created_at      DateTime     @default(now()) @db.Timestamptz
-
-  citations MessageCitation[]
-
-  @@index([conversation_id])
-  @@index([user_id])
-}
-
-model MessageCitation {
-  id          String  @id @default(uuid())
-  message_id  String
-  message     Message @relation(fields: [message_id], references: [id], onDelete: Cascade)
-  page_number Int // tap to jump
-  quoted_text String
-
-  @@index([message_id])
-}
-
-// ── REVIEW · PRO ─────────────────────────────────────────────────
-
-model ReviewCard {
-  id            String     @id @default(uuid())
-  document_id   String
-  document      Document   @relation(fields: [document_id], references: [id], onDelete: Cascade)
-  highlight_id  String?
-  highlight     Highlight? @relation(fields: [highlight_id], references: [id], onDelete: Cascade)
-  user_id       String
-  user          User       @relation(fields: [user_id], references: [id], onDelete: Cascade)
-  front         String // prompt
-  back          String // answer
-  due_at        DateTime   @db.Timestamptz
-  interval_days Int        @default(0) // SM-2
-  ease_factor   Float      @default(2.5) // SM-2
-  created_at    DateTime   @default(now()) @db.Timestamptz
-
-  card_reviews CardReview[]
-
-  @@index([document_id])
-  @@index([highlight_id])
-  @@index([user_id, due_at])
-}
-
-model CardReview {
-  id          String     @id @default(uuid())
-  card_id     String
-  card        ReviewCard @relation(fields: [card_id], references: [id], onDelete: Cascade)
-  reviewed_at DateTime   @default(now()) @db.Timestamptz
-  rating      Int        @db.SmallInt // 0-3
-  next_due_at DateTime   @db.Timestamptz
-
-  @@index([card_id])
-}
-
-// ── AI BRIDGE · IN POSTGRES (OUTBOX) ─────────────────────────────
-
-model AiJob {
-  id          String    @id @default(uuid())
-  user_id     String
-  user        User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
-  document_id String
-  document    Document  @relation(fields: [document_id], references: [id], onDelete: Cascade)
-  kind        String // summarize | explain | ask | cards
-  status      String    @default("queued") // queued | running | done | failed
-  payload     Json? // request args
-  result_id   String? // row created
-  error       String?
-  created_at  DateTime  @default(now()) @db.Timestamptz
-  finished_at DateTime? @db.Timestamptz
-
-  @@index([user_id])
-  @@index([document_id])
-  @@index([status])
-}
-
-// ── RAG ──────────────────────────────────────────────────────────
-
-model DocumentChunk {
-  id          String                       @id @default(uuid())
-  document_id String
-  document    Document                     @relation(fields: [document_id], references: [id], onDelete: Cascade)
-  page_number Int // for citations
-  content     String
-  embedding   Unsupported("vector(1536)")? // pgvector
-  token_count Int?
-
-  @@index([document_id])
+  @@id([userId, docKey])
 }

@@ -1,19 +1,20 @@
 const httpStatus = require('http-status');
 const catchAsync = require('../utils/catchAsync');
-const exclude = require('../utils/exclude');
-const { authService, userService, tokenService, emailService } = require('../services');
+const { serializeUser } = require('../utils/serialize');
+const { authService, userService, tokenService, emailService, deviceService } = require('../services');
+
+/** The one response shape the client's auth layer already handles. */
+const authResponse = async (user) => ({ user: serializeUser(user), tokens: await tokenService.generateAuthTokens(user) });
 
 const register = catchAsync(async (req, res) => {
   const user = await userService.createUser(req.body);
-  const tokens = await tokenService.generateAuthTokens(user);
-  res.status(httpStatus.CREATED).send({ user: exclude(user, ['password', 'createdAt', 'updatedAt']), tokens });
+  res.status(httpStatus.CREATED).send(await authResponse(user));
 });
 
 const login = catchAsync(async (req, res) => {
   const { email, password } = req.body;
   const user = await authService.loginUserWithEmailAndPassword(email, password);
-  const tokens = await tokenService.generateAuthTokens(user);
-  res.send({ user: exclude(user, ['password', 'createdAt', 'updatedAt']), tokens });
+  res.send(await authResponse(user));
 });
 
 const logout = catchAsync(async (req, res) => {
@@ -48,6 +49,31 @@ const verifyEmail = catchAsync(async (req, res) => {
   res.status(httpStatus.NO_CONTENT).send();
 });
 
+/** §1.1 — idempotent anonymous session for a device */
+const device = catchAsync(async (req, res) => {
+  const user = await deviceService.registerDevice(req.body);
+  res.send(await authResponse(user));
+});
+
+/** §1.2 — the anonymous row becomes the real account, so nothing has to move */
+const linkEmail = catchAsync(async (req, res) => {
+  const user = await deviceService.linkEmail(req.user, req.body);
+  await deviceService.revokeRefreshTokens(user.id);
+  res.send(await authResponse(user));
+});
+
+const linkGoogle = catchAsync(async (req, res) => {
+  const user = await deviceService.linkGoogle(req.user, req.body.idToken);
+  await deviceService.revokeRefreshTokens(user.id);
+  res.send(await authResponse(user));
+});
+
+/** §1.3 — signing in to the account that already owns this Google identity */
+const googleLogin = catchAsync(async (req, res) => {
+  const user = await deviceService.loginWithGoogle(req.body.idToken);
+  res.send(await authResponse(user));
+});
+
 module.exports = {
   register,
   login,
@@ -57,4 +83,8 @@ module.exports = {
   resetPassword,
   sendVerificationEmail,
   verifyEmail,
+  device,
+  linkEmail,
+  linkGoogle,
+  googleLogin,
 };

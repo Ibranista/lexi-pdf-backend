@@ -37,8 +37,9 @@ describe('Auth routes', () => {
         id: expect.anything(),
         name: newUser.name,
         email: newUser.email,
-        role: 'user',
+        role: 'USER',
         isEmailVerified: false,
+        isAnonymous: false,
       });
 
       const dbUser = await prisma.user.findUnique({ where: { id: res.body.user.id } });
@@ -96,8 +97,9 @@ describe('Auth routes', () => {
         id: expect.anything(),
         name: userOne.name,
         email: userOne.email,
-        role: userOne.role,
+        role: userOne.role.toUpperCase(),
         isEmailVerified: userOne.isEmailVerified,
+        isAnonymous: false,
       });
 
       expect(res.body.tokens).toEqual({

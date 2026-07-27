@@ -170,7 +170,35 @@ SMTP_PORT=587
 SMTP_USERNAME=email-server-username
 SMTP_PASSWORD=email-server-password
 EMAIL_FROM=support@yourapp.com
+
+# Public origin of this API, used to build absolute media URLs (TTS audio)
+PUBLIC_URL=http://localhost:3000
+
+# OpenAI, via LangChain
+OPENAI_API_KEY=
+OPENAI_MODEL=gpt-4o-mini
+OPENAI_TTS_MODEL=gpt-4o-mini-tts
+# Languages a TTS voice actually exists for. `am` is deliberately absent:
+# /ai/tts returns 200 with audioUrl omitted and the client hides "Hear it".
+TTS_LANGS=en,ar
+
+# Google Sign-In — every client id an idToken may be addressed to, comma
+# separated: the Web client id (Android sign-in uses it) and the iOS client id.
+# Leave empty and POST /auth/link/google answers 503 GOOGLE_NOT_CONFIGURED.
+GOOGLE_CLIENT_ID=
+
+# AI quota, counted in requests per user
+AI_QUOTA_ANONYMOUS=10
+AI_QUOTA_FREE=30
+AI_QUOTA_PRO=1000
+
+# Sync
+SYNC_MAX_PAYLOAD_BYTES=2097152
+SYNC_TOMBSTONE_DAYS=90
 ```
+
+Without `OPENAI_API_KEY` the server still boots and serves everything except the
+`/v1/ai/*` routes, which answer 503 `AI_NOT_CONFIGURED`.
 
 ## Project Structure
 
@@ -205,7 +233,11 @@ List of available routes:
 `POST /v1/auth/forgot-password` - send reset password email\
 `POST /v1/auth/reset-password` - reset password\
 `POST /v1/auth/send-verification-email` - send verification email\
-`POST /v1/auth/verify-email` - verify email
+`POST /v1/auth/verify-email` - verify email\
+`POST /v1/auth/device` - register a device, get an anonymous session\
+`POST /v1/auth/google` - sign in with a Google id token\
+`POST /v1/auth/link/email` - turn the anonymous session into an email account\
+`POST /v1/auth/link/google` - turn the anonymous session into a Google account
 
 **User routes**:\
 `POST /v1/users` - create a user\
@@ -213,6 +245,36 @@ List of available routes:
 `GET /v1/users/:userId` - get user\
 `PATCH /v1/users/:userId` - update user\
 `DELETE /v1/users/:userId` - delete user
+
+**Sync routes**:\
+`POST /v1/sync` - push local changes and pull everything since the cursor\
+`POST /v1/sync/merge` - fold an anonymous device's data into the signed-in account
+
+**AI routes** (share one per-user budget; 402 `AI_QUOTA_EXHAUSTED` when it runs out):\
+`POST /v1/ai/context` - upload extracted book text\
+`POST /v1/ai/translate` - translate and explain a selection in its passage\
+`POST /v1/ai/chat` - ask Lexi about the open document\
+`GET /v1/ai/tts` - speak a word in the target language
+
+**Suggestion routes**:\
+`GET /v1/book-suggestions` - personalised reading suggestions (no auth)
+
+### The reader API
+
+Everything above `/v1/sync` implements the LexiPDF client contract. Three things
+about it are worth knowing before changing any of it:
+
+- **Identity is anonymous-first.** `POST /v1/auth/device` gives every install a
+  real user row, so highlights and vocabulary work before there is an account.
+  Linking upgrades that same row in place — there is no data migration path,
+  because nothing ever has to move.
+- **Sync rows carry two clocks.** `updatedAt` is the client's and decides
+  last-write-wins; `serverUpdatedAt` is ours and drives the pull cursor. A
+  device with a skewed clock can lose a merge but can never make rows invisible
+  to other devices.
+- **Lexi is scoped to one document**, enforced in the system prompt *and* by an
+  output check in `ai.service.js` that refuses to put an off-topic answer on the
+  wire. Document text reaches the model wrapped as untrusted data.
 
 ## Error Handling
 

@@ -10,3 +10,9 @@ yarn-error.log
 
 # Code coverage
 coverage
+
+# generated speech
+public/tts
+
+# credential files downloaded from the Google Cloud console
+client_secret_*.json
