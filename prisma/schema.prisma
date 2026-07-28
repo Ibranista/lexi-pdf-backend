@@ -43,6 +43,18 @@ model User {
   vocab       VocabEntry[]
   chats       ChatSession[]
   indexes     DocumentIndex[]
+  memory      UserMemory?
+}
+
+// A short, evolving note on how this reader likes to be talked to — their
+// interests and the register/length of answer they engage with — distilled
+// from their Lexi conversations and folded into the system prompt so replies
+// adapt to them over time. One row per user; kept deliberately small.
+model UserMemory {
+  userId    String   @id
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  style     String   @default("") @db.Text
+  updatedAt DateTime @updatedAt @db.Timestamptz
 }
 
 model Device {

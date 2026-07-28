@@ -46,6 +46,19 @@ const chat = {
   }),
 };
 
+const chatHistory = {
+  query: Joi.object().keys({
+    sessionId: Joi.string().max(64).required(),
+    docKey: Joi.string().length(64).hex(),
+  }),
+};
+
+const speak = {
+  body: Joi.object().keys({
+    text: Joi.string().max(4000).required(),
+  }),
+};
+
 const tts = {
   query: Joi.object().keys({
     text: Joi.string().max(500).required(),
@@ -57,5 +70,7 @@ module.exports = {
   context,
   translate,
   chat,
+  chatHistory,
+  speak,
   tts,
 };

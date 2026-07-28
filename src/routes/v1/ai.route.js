@@ -9,6 +9,9 @@ const router = express.Router();
 router.post('/context', auth(), validate(aiValidation.context), aiController.context);
 router.post('/translate', auth(), validate(aiValidation.translate), aiController.translate);
 router.post('/chat', auth(), validate(aiValidation.chat), aiController.chat);
+router.post('/chat/stream', auth(), validate(aiValidation.chat), aiController.chatStream);
+router.get('/chat/history', auth(), validate(aiValidation.chatHistory), aiController.chatHistory);
+router.post('/speak', auth(), validate(aiValidation.speak), aiController.speak);
 router.get('/tts', auth(), validate(aiValidation.tts), aiController.tts);
 
 module.exports = router;

@@ -27,6 +27,56 @@ const chat = catchAsync(async (req, res) => {
   res.send({ ...result, quota });
 });
 
+/**
+ * Streaming chat. Quota is reserved before any bytes go out, so an exhausted
+ * budget is a clean 402 (handled by the error middleware) rather than a broken
+ * stream. Then the reply is sent as Server-Sent Events — one `data: { t }` per
+ * token, a final `data: { done, kind, sessionId, quota }` — which the client's
+ * EventSource renders token-by-token. `no-transform` keeps the gzip middleware
+ * from buffering the stream, and `setNoDelay` disables Nagle so each token's
+ * packet goes out immediately instead of being coalesced.
+ */
+const chatStream = catchAsync(async (req, res) => {
+  const reserved = await quotaService.reserve(req.user);
+
+  res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders();
+  if (res.socket && typeof res.socket.setNoDelay === 'function') {
+    res.socket.setNoDelay(true);
+  }
+
+  const send = (obj) => {
+    res.write(`data: ${JSON.stringify(obj)}\n\n`);
+    if (typeof res.flush === 'function') res.flush();
+  };
+
+  try {
+    const result = await aiService.chatStream(req.user.id, req.body, (token) => send({ t: token }));
+    send({ done: true, kind: result.kind, sessionId: result.sessionId, quota: quotaService.state(reserved) });
+  } catch (error) {
+    await quotaService.release(reserved.id);
+    send({ error: true, message: 'Lexi could not finish that just now.' });
+  }
+  res.end();
+});
+
+const chatHistory = catchAsync(async (req, res) => {
+  const messages = await aiService.chatHistory(req.user.id, req.query.sessionId);
+  res.send({ messages });
+});
+
+/**
+ * Read arbitrary text aloud (a chat reply's speaker button). Not metered — it
+ * re-voices content the reader already paid for, and clips are cached by text.
+ */
+const speak = catchAsync(async (req, res) => {
+  const audioUrl = await ttsService.narrate(req.body.text, originOf(req));
+  res.send({ ...(audioUrl ? { audioUrl } : {}) });
+});
+
 const tts = catchAsync(async (req, res) => {
   const { text, lang } = req.query;
 
@@ -44,5 +94,8 @@ module.exports = {
   context,
   translate,
   chat,
+  chatStream,
+  chatHistory,
+  speak,
   tts,
 };
