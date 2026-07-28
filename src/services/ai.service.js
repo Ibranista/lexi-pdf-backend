@@ -48,6 +48,11 @@ const wordCardSchema = z.object({
   translit: z.string().nullable().describe('Latin transliteration of tr; null when the target is already Latin-script'),
   s1: z.string().describe('what it means in THIS passage — not a dictionary gloss. 12–24 words.'),
   s2: z.string().describe("why it matters here: the sentence's point, or the contrast it sets up. 12–24 words."),
+  example: z
+    .string()
+    .describe(
+      'ONE natural example sentence that uses the selection (the original word/phrase in its own language), NOT copied from the passage. Under 120 characters.'
+    ),
 });
 
 /**
@@ -76,7 +81,7 @@ const bookFor = async (userId, docKey) => {
  * @param {Object} params - { docKey, text, context, page, targetLang, style }
  * @returns {Promise<Object>}
  */
-const translate = async (userId, { docKey, text, context, page, targetLang, style }) => {
+const translate = async (userId, { docKey, text, context, page, targetLang, style }, requestBase) => {
   const langName = LANG_NAMES[targetLang] || targetLang;
   const { title, author } = await bookFor(userId, docKey);
 
@@ -90,6 +95,7 @@ const translate = async (userId, { docKey, text, context, page, targetLang, styl
     '- s1 says what the selection means *in this passage*. Never a generic dictionary definition.',
     '- s2 says why it matters here: the point of the sentence, or the contrast it sets up.',
     '- s1 and s2 must each stay under 140 characters. They render as two bullets on a card that does not scroll.',
+    '- example is ONE natural sentence that uses the selection (the original word), invented rather than quoted from the passage. Under 120 characters.',
     `- pos is a short label for a fixed pill, about 14 characters.`,
     LATIN_LANGS.includes(targetLang)
       ? '- The target language is Latin-script: leave translit out.'
@@ -105,7 +111,23 @@ const translate = async (userId, { docKey, text, context, page, targetLang, styl
     .invoke([new SystemMessage(system), new HumanMessage(human)]);
 
   const translit = LATIN_LANGS.includes(targetLang) ? undefined : card.translit;
-  const audioUrl = await ttsService.synthesize(card.tr, targetLang);
+  const example = clamp(card.example, 120);
+
+  // Voice the whole card, not just the translated word: the selection, the two
+  // explanation lines and the example, as one natural reading. The translated
+  // form is spoken only for languages we actually have a voice for; otherwise
+  // it's shown on the card but not pronounced (e.g. Amharic), while the rest of
+  // the reading — which is in the reader's explanation language — still plays.
+  const spoken = [
+    `${card.word || text}.`,
+    ttsService.hasVoice(targetLang) && card.tr ? `In ${langName}: ${card.tr}.` : '',
+    clamp(card.s1),
+    clamp(card.s2),
+    example ? `For example: ${example}` : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
+  const audioUrl = await ttsService.narrate(spoken, requestBase);
 
   return {
     word: card.word || text,
@@ -116,6 +138,7 @@ const translate = async (userId, { docKey, text, context, page, targetLang, styl
     langName,
     s1: clamp(card.s1),
     s2: clamp(card.s2),
+    ...(example ? { example } : {}),
     ...(audioUrl ? { audioUrl } : {}),
   };
 };

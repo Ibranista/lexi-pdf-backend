@@ -28,6 +28,7 @@
     "prepare": "husky install",
     "postinstall": "prisma generate",
     "db:migrate": "prisma migrate dev",
+    "db:status": "prisma migrate status",
     "db:studio": "prisma studio"
   },
   "keywords": [

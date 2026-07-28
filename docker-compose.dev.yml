@@ -1,8 +1,9 @@
-version: '3'
-
 services:
   node-app:
     container_name: node-app-dev
-    command: yarn dev -L
+    # Migrate before booting. Without this the container happily starts against
+    # a database missing the newest tables and only fails later, at the first
+    # query — which reads as a broken endpoint rather than an unmigrated schema.
+    command: sh -c "npx prisma migrate deploy && yarn dev -L"
     ports:
       - '5555:5555'
