@@ -32,6 +32,9 @@ const envVarsSchema = Joi.object()
       .allow('')
       .default('')
       .description('comma-separated Google client ids an id token may be addressed to'),
+    AI_TRANSLATE_MAX_WORDS: Joi.number()
+      .default(80)
+      .description('max words a single selection may send to the translate/explain word card'),
     AI_QUOTA_ANONYMOUS: Joi.number().default(10).description('AI requests granted to an anonymous user, non-renewing'),
     AI_QUOTA_FREE: Joi.number().default(30).description('AI requests per month for a signed-in free user'),
     AI_QUOTA_PRO: Joi.number().default(1000).description('AI requests per month for a pro user'),
@@ -97,6 +100,7 @@ module.exports = {
       .filter(Boolean),
   },
   ai: {
+    translateMaxWords: envVars.AI_TRANSLATE_MAX_WORDS,
     quota: {
       anonymous: envVars.AI_QUOTA_ANONYMOUS,
       free: envVars.AI_QUOTA_FREE,

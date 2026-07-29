@@ -33,6 +33,15 @@ model User {
   aiUsed     Int       @default(0)
   aiResetsAt DateTime? @db.Timestamptz
 
+  // Onboarding lives on the user row, not on the device, for the same reason
+  // identity does: linking upgrades this row in place, so a reader who answered
+  // the question anonymously is never asked it again after signing in, and a
+  // second device inherits the answer the moment they sign in there.
+  // `onboardedAt` is the merge tie-break — same last-write-wins rule as sync.
+  hasCompletedOnboarding Boolean   @default(false)
+  interests              String[]  @default([])
+  onboardedAt            DateTime? @db.Timestamptz
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

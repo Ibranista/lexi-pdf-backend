@@ -1,8 +1,14 @@
+const httpStatus = require('http-status');
 const { z } = require('zod');
 const { SystemMessage, HumanMessage, AIMessage } = require('@langchain/core/messages');
 const prisma = require('../config/prisma');
+const config = require('../config/config');
 const { chatModel } = require('../config/langchain');
+const ApiError = require('../utils/ApiError');
 const ttsService = require('./tts.service');
+
+/** Words in a string, counting runs of non-whitespace. */
+const countWords = (text) => (text ? text.trim().split(/\s+/).filter(Boolean).length : 0);
 
 const LANG_NAMES = { am: 'Amharic', ar: 'Arabic', en: 'English' };
 // scripts that need no transliteration line on the card
@@ -90,6 +96,15 @@ const bookFor = async (userId, docKey) => {
  * @returns {Promise<Object>}
  */
 const translate = async (userId, { docKey, text, context, page, targetLang, style }, requestBase) => {
+  // A selection is a word or a passage, never a chapter. Reject an oversized
+  // one before it costs the reader a credit or the server a model call.
+  const maxWords = config.ai.translateMaxWords;
+  if (countWords(text) > maxWords) {
+    throw new ApiError(httpStatus.BAD_REQUEST, `Select up to ${maxWords} words to translate.`, true, '', {
+      reason: 'SELECTION_TOO_LONG',
+    });
+  }
+
   const langName = LANG_NAMES[targetLang] || targetLang;
   const { title, author } = await bookFor(userId, docKey);
 

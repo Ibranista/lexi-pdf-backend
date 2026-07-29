@@ -40,6 +40,9 @@ describe('Auth routes', () => {
         role: 'USER',
         isEmailVerified: false,
         isAnonymous: false,
+        hasCompletedOnboarding: false,
+        interests: [],
+        onboardedAt: null,
       });
 
       const dbUser = await prisma.user.findUnique({ where: { id: res.body.user.id } });
@@ -100,6 +103,9 @@ describe('Auth routes', () => {
         role: userOne.role.toUpperCase(),
         isEmailVerified: userOne.isEmailVerified,
         isAnonymous: false,
+        hasCompletedOnboarding: false,
+        interests: [],
+        onboardedAt: null,
       });
 
       expect(res.body.tokens).toEqual({

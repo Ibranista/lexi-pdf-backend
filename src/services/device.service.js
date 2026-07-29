@@ -40,6 +40,13 @@ const registerDevice = async (deviceBody) => {
     data: {
       isAnonymous: true,
       aiTier: 'anonymous',
+      // Onboarding is the one thing the detached device keeps. Everything else
+      // belonged to the account and stays with it, but "has this person been
+      // shown the question on this phone?" is about the phone in their hand —
+      // signing out should not walk them back through onboarding.
+      hasCompletedOnboarding: existing ? existing.user.hasCompletedOnboarding : false,
+      interests: existing ? existing.user.interests : [],
+      onboardedAt: existing ? existing.user.onboardedAt : null,
       devices: { create: { deviceId, ...meta } },
     },
   });

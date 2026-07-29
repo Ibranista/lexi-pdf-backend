@@ -139,7 +139,10 @@ stable across reinstalls, and do not use it for anything security-bearing.
     "name": "",
     "role": "USER",
     "isEmailVerified": false,
-    "isAnonymous": true
+    "isAnonymous": true,
+    "hasCompletedOnboarding": false,
+    "interests": [],
+    "onboardedAt": null
   },
   "tokens": {
     "access": { "token": "…", "expires": "2026-07-27T12:00:00.000Z" },
@@ -203,6 +206,47 @@ call and it must be idempotent.
 again with the same `deviceId` to get back to an anonymous session, so the reader
 keeps working. **The anonymous user it returns must be a fresh, empty one** — do
 not resurrect the merged account's data for a signed-out device.
+
+### 1.5 Onboarding
+
+`hasCompletedOnboarding` is server state, not device state, and it rides on the
+same user row as everything else in this section — which is what makes it work
+for a reader who has no account. The client's root navigator gates its
+onboarding screen on it.
+
+```http
+PATCH /auth/onboarding
+Authorization: Bearer <access token>
+
+{ "hasCompletedOnboarding": true, "interests": ["textbooks", "philosophy"] }
+```
+
+**200** — `{ "user": … }`, the same user object as above. Anonymous callers are
+the normal case: readers onboard before they ever sign in. `interests` are the
+§3.1 ids, in the order picked, and replace the stored list rather than merging
+into it. An unknown id is a **400**.
+
+```http
+GET /auth/me
+Authorization: Bearer <access token>
+```
+
+**200** — `{ "user": … }`. This is how a launch that already has a token reads
+the flag back; `/auth/device` only answers on the launch that mints the session.
+
+How it travels:
+
+- **Linking (§1.2)** upgrades the row in place, so the answer comes with it.
+- **Merging (§1.3)** folds it in: newer `onboardedAt` wins, and an account that
+  has onboarded is never un-onboarded by absorbing a device that hasn't.
+- **Signing out (§1.4)** hands the device a fresh, empty anonymous user — empty
+  except for this flag. "Has this person seen onboarding on this phone?" is
+  about the phone, and signing out should not walk them through it again.
+
+The client treats its own copy as offline-first: it answers locally, renders
+from that immediately, and retries the `PATCH` on reconnect, on foreground and
+on next launch until it lands. Until it does, the local answer is the newer of
+the two and wins over anything `GET /auth/me` says.
 
 ---
 

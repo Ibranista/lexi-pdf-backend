@@ -212,6 +212,54 @@ describe('POST /v1/sync/merge', () => {
     expect(stored.page).toBe(12);
   });
 
+  test('should carry the anonymous onboarding answer into an account that never onboarded', async () => {
+    const anon = await newDevice();
+    await request(app)
+      .patch('/v1/auth/onboarding')
+      .set('Authorization', `Bearer ${anon.token}`)
+      .send({ hasCompletedOnboarding: true, interests: ['philosophy'] });
+
+    const account = await newDevice();
+    await request(app)
+      .post('/v1/auth/link/email')
+      .set('Authorization', `Bearer ${account.token}`)
+      .send({ email: 'reader@example.com', password: 'password1', name: 'Reader' });
+
+    await request(app)
+      .post('/v1/sync/merge')
+      .set('Authorization', `Bearer ${account.token}`)
+      .send({ fromDeviceId: anon.deviceId })
+      .expect(httpStatus.OK);
+
+    const stored = await prisma.user.findUnique({ where: { id: account.userId } });
+    expect(stored.hasCompletedOnboarding).toBe(true);
+    expect(stored.interests).toEqual(['philosophy']);
+  });
+
+  test('should never un-onboard an account that absorbs a device that never onboarded', async () => {
+    const anon = await newDevice();
+
+    const account = await newDevice();
+    await request(app)
+      .post('/v1/auth/link/email')
+      .set('Authorization', `Bearer ${account.token}`)
+      .send({ email: 'reader@example.com', password: 'password1', name: 'Reader' });
+    await request(app)
+      .patch('/v1/auth/onboarding')
+      .set('Authorization', `Bearer ${account.token}`)
+      .send({ hasCompletedOnboarding: true, interests: ['history'] });
+
+    await request(app)
+      .post('/v1/sync/merge')
+      .set('Authorization', `Bearer ${account.token}`)
+      .send({ fromDeviceId: anon.deviceId })
+      .expect(httpStatus.OK);
+
+    const stored = await prisma.user.findUnique({ where: { id: account.userId } });
+    expect(stored.hasCompletedOnboarding).toBe(true);
+    expect(stored.interests).toEqual(['history']);
+  });
+
   test('should be idempotent: an unknown or already-merged device is zero counts, not an error', async () => {
     const account = await newDevice();
 

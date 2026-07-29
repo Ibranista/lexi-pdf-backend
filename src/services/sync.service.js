@@ -277,6 +277,33 @@ const sync = async (userId, body) => {
 };
 
 /**
+ * Onboarding follows the same last-write-wins rule as everything else here.
+ * The account keeps its own answers unless the device answered them later —
+ * which is the ordinary case, because the reader onboarded anonymously on this
+ * phone and only then signed into an account made somewhere else.
+ *
+ * Never un-completes: an account that has onboarded stays onboarded even if
+ * the row being absorbed had not.
+ */
+const mergeOnboarding = async (user, source) => {
+  const completed = user.hasCompletedOnboarding || source.hasCompletedOnboarding;
+  const deviceIsNewer = toMs(source.onboardedAt) > (toMs(user.onboardedAt) ?? 0);
+  const adoptDevice = source.hasCompletedOnboarding && (!user.hasCompletedOnboarding || deviceIsNewer);
+
+  if (completed === user.hasCompletedOnboarding && !adoptDevice) {
+    return;
+  }
+
+  await prisma.user.update({
+    where: { id: user.id },
+    data: {
+      hasCompletedOnboarding: completed,
+      ...(adoptDevice ? { interests: source.interests, onboardedAt: source.onboardedAt } : {}),
+    },
+  });
+};
+
+/**
  * Fold an anonymous user's data into the caller's account and delete it
  * (spec §1.3). Union by entity id; on collision the newer `updatedAt` wins.
  *
@@ -309,6 +336,8 @@ const merge = async (user, fromDeviceId) => {
     merged[name] = rows.length - result.conflicts.length;
   }
   /* eslint-enable no-await-in-loop, no-restricted-syntax */
+
+  await mergeOnboarding(user, source);
 
   // cascades through the anonymous user's devices, tokens and leftover rows
   await prisma.user.delete({ where: { id: source.id } });

@@ -16,6 +16,8 @@ router.post('/send-verification-email', auth(), authController.sendVerificationE
 router.post('/verify-email', validate(authValidation.verifyEmail), authController.verifyEmail);
 
 // anonymous-first identity (spec §1)
+router.get('/me', auth(), authController.me);
+router.patch('/onboarding', auth(), validate(authValidation.onboarding), authController.onboarding);
 router.post('/device', validate(authValidation.device), authController.device);
 router.post('/google', validate(authValidation.linkGoogle), authController.googleLogin);
 router.post('/link/email', auth(), validate(authValidation.linkEmail), authController.linkEmail);
@@ -350,6 +352,80 @@ module.exports = router;
  *                   $ref: '#/components/schemas/User'
  *                 tokens:
  *                   $ref: '#/components/schemas/AuthTokens'
+ */
+
+/**
+ * @swagger
+ * /auth/me:
+ *   get:
+ *     summary: The caller's own user, anonymous or not
+ *     description: |
+ *       How the client learns `hasCompletedOnboarding` on a launch that did not have to
+ *       call `POST /auth/device`. Works for anonymous sessions — that is the point: the
+ *       onboarding answer is stored against the row minted for this device, so it is
+ *       already there before there is an account.
+ *     tags: [Auth]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       "200":
+ *         description: OK
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 user:
+ *                   $ref: '#/components/schemas/User'
+ *       "401":
+ *         $ref: '#/components/responses/Unauthorized'
+ */
+
+/**
+ * @swagger
+ * /auth/onboarding:
+ *   patch:
+ *     summary: Record that this reader finished onboarding, and what they read
+ *     description: |
+ *       Stored on the user row, so linking carries it in place and a second device
+ *       inherits it on sign-in. Anonymous callers are expected — a reader onboards
+ *       before they ever have an account. Send only the keys you are changing;
+ *       `interests` replaces the stored list rather than merging into it.
+ *     tags: [Auth]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             minProperties: 1
+ *             properties:
+ *               hasCompletedOnboarding:
+ *                 type: boolean
+ *               interests:
+ *                 type: array
+ *                 description: onboarding ids, in the order the reader picked them
+ *                 items:
+ *                   type: string
+ *             example:
+ *               hasCompletedOnboarding: true
+ *               interests: [textbooks, philosophy]
+ *     responses:
+ *       "200":
+ *         description: OK
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 user:
+ *                   $ref: '#/components/schemas/User'
+ *       "400":
+ *         description: an unknown interest id
+ *       "401":
+ *         $ref: '#/components/responses/Unauthorized'
  */
 
 /**

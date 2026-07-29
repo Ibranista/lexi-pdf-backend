@@ -1,5 +1,6 @@
 const Joi = require('joi');
 const { password } = require('./custom.validation');
+const { TOPICS } = require('../services/suggestion.service');
 
 const register = {
   body: Joi.object().keys({
@@ -62,6 +63,20 @@ const device = {
   }),
 };
 
+const onboarding = {
+  body: Joi.object()
+    .keys({
+      hasCompletedOnboarding: Joi.boolean(),
+      // the same ids /book-suggestions takes — an unknown one personalises
+      // nothing, so it is a client bug worth answering 400 for rather than
+      // storing and quietly ignoring forever
+      interests: Joi.array()
+        .items(Joi.string().valid(...Object.keys(TOPICS)))
+        .max(Object.keys(TOPICS).length),
+    })
+    .min(1),
+};
+
 const linkEmail = {
   body: Joi.object().keys({
     email: Joi.string().required().email(),
@@ -84,6 +99,7 @@ module.exports = {
   forgotPassword,
   resetPassword,
   verifyEmail,
+  onboarding,
   device,
   linkEmail,
   linkGoogle,

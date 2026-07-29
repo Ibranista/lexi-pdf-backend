@@ -235,6 +235,8 @@ List of available routes:
 `POST /v1/auth/send-verification-email` - send verification email\
 `POST /v1/auth/verify-email` - verify email\
 `POST /v1/auth/device` - register a device, get an anonymous session\
+`GET /v1/auth/me` - the caller's own user, anonymous or not\
+`PATCH /v1/auth/onboarding` - record that this reader finished onboarding\
 `POST /v1/auth/google` - sign in with a Google id token\
 `POST /v1/auth/link/email` - turn the anonymous session into an email account\
 `POST /v1/auth/link/google` - turn the anonymous session into a Google account
@@ -268,6 +270,13 @@ about it are worth knowing before changing any of it:
   real user row, so highlights and vocabulary work before there is an account.
   Linking upgrades that same row in place — there is no data migration path,
   because nothing ever has to move.
+- **Onboarding is server state, not device state.** `hasCompletedOnboarding`
+  and `interests` sit on the user row and come back on every auth response, so
+  the client gates its onboarding screen on the server's answer. Anonymous
+  readers write it through `PATCH /v1/auth/onboarding` against the row their
+  device id owns; linking carries it in place, and `POST /v1/sync/merge` folds
+  it into the account it absorbs into (newer `onboardedAt` wins, and an account
+  that has onboarded never gets un-onboarded).
 - **Sync rows carry two clocks.** `updatedAt` is the client's and decides
   last-write-wins; `serverUpdatedAt` is ours and drives the pull cursor. A
   device with a skewed clock can lose a merge but can never make rows invisible

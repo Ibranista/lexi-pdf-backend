@@ -49,6 +49,21 @@ const verifyEmail = catchAsync(async (req, res) => {
   res.status(httpStatus.NO_CONTENT).send();
 });
 
+/**
+ * Who the caller is, onboarding flag included. The client calls this on every
+ * launch: `/auth/device` only answers on the launch that mints the session, and
+ * the root navigator needs the flag on all the others too.
+ */
+const me = catchAsync(async (req, res) => {
+  res.send({ user: serializeUser(req.user) });
+});
+
+/** The reader finished (or skipped) onboarding — recorded against their row. */
+const onboarding = catchAsync(async (req, res) => {
+  const user = await userService.setOnboarding(req.user, req.body);
+  res.send({ user: serializeUser(user) });
+});
+
 /** §1.1 — idempotent anonymous session for a device */
 const device = catchAsync(async (req, res) => {
   const user = await deviceService.registerDevice(req.body);
@@ -83,6 +98,8 @@ module.exports = {
   resetPassword,
   sendVerificationEmail,
   verifyEmail,
+  me,
+  onboarding,
   device,
   linkEmail,
   linkGoogle,

@@ -2,9 +2,11 @@ components:
   schemas:
     User:
       type: object
+      description: As produced by `serializeUser`. Anonymous rows get "" for email and name.
       properties:
         id:
           type: string
+          format: uuid
         email:
           type: string
           format: email
@@ -12,12 +14,33 @@ components:
           type: string
         role:
           type: string
-          enum: [user, admin]
+          enum: [USER, ADMIN]
+        isEmailVerified:
+          type: boolean
+        isAnonymous:
+          type: boolean
+          description: true for the row POST /auth/device mints — an identity, not an account
+        hasCompletedOnboarding:
+          type: boolean
+          description: what the client's root navigator gates the onboarding screen on
+        interests:
+          type: array
+          items:
+            type: string
+        onboardedAt:
+          type: integer
+          nullable: true
+          description: epoch ms, null until onboarding completes
       example:
-        id: 5ebac534954b54139806c112
+        id: 9f0b0d3c-1f47-4a1a-9a2b-a2f1c0de8e11
         email: fake@example.com
         name: fake name
-        role: user
+        role: USER
+        isEmailVerified: false
+        isAnonymous: false
+        hasCompletedOnboarding: true
+        interests: [textbooks, philosophy]
+        onboardedAt: 1769000000000
 
     Token:
       type: object

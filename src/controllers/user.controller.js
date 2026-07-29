@@ -6,8 +6,21 @@ const exclude = require('../utils/exclude');
 const { userService } = require('../services');
 
 // internal columns the admin user API has no business exposing: the password
-// hash, row timestamps, and the AI budget counters
-const PRIVATE_FIELDS = ['password', 'createdAt', 'updatedAt', 'googleId', 'isAnonymous', 'aiTier', 'aiUsed', 'aiResetsAt'];
+// hash, row timestamps, the AI budget counters, and the reader's own onboarding
+// state (theirs to read and write through /auth/me and /auth/onboarding)
+const PRIVATE_FIELDS = [
+  'password',
+  'createdAt',
+  'updatedAt',
+  'googleId',
+  'isAnonymous',
+  'aiTier',
+  'aiUsed',
+  'aiResetsAt',
+  'hasCompletedOnboarding',
+  'interests',
+  'onboardedAt',
+];
 
 const createUser = catchAsync(async (req, res) => {
   const user = await userService.createUser(req.body);

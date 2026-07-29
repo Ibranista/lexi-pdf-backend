@@ -21,6 +21,9 @@ describe('Anonymous-first identity', () => {
         role: 'USER',
         isEmailVerified: false,
         isAnonymous: true,
+        hasCompletedOnboarding: false,
+        interests: [],
+        onboardedAt: null,
       });
       expect(res.body.tokens).toEqual({
         access: { token: expect.anything(), expires: expect.anything() },
@@ -128,6 +131,85 @@ describe('Anonymous-first identity', () => {
         .post('/v1/auth/link/email')
         .send({ email: 'reader@example.com', password: 'password1', name: 'Reader' })
         .expect(httpStatus.UNAUTHORIZED);
+    });
+  });
+
+  describe('PATCH /v1/auth/onboarding', () => {
+    let anonymous;
+    let auth;
+
+    beforeEach(async () => {
+      const res = await request(app).post('/v1/auth/device').send(deviceBody(uuidv4()));
+      anonymous = res.body;
+      auth = `Bearer ${anonymous.tokens.access.token}`;
+    });
+
+    test('should record onboarding against the anonymous row and echo it back', async () => {
+      const res = await request(app)
+        .patch('/v1/auth/onboarding')
+        .set('Authorization', auth)
+        .send({ hasCompletedOnboarding: true, interests: ['textbooks', 'philosophy'] })
+        .expect(httpStatus.OK);
+
+      expect(res.body.user).toMatchObject({
+        id: anonymous.user.id,
+        hasCompletedOnboarding: true,
+        interests: ['textbooks', 'philosophy'],
+      });
+      expect(res.body.user.onboardedAt).toEqual(expect.any(Number));
+    });
+
+    test('should be readable back from GET /v1/auth/me', async () => {
+      await request(app).patch('/v1/auth/onboarding').set('Authorization', auth).send({ hasCompletedOnboarding: true });
+
+      const res = await request(app).get('/v1/auth/me').set('Authorization', auth).expect(httpStatus.OK);
+      expect(res.body.user).toMatchObject({ id: anonymous.user.id, hasCompletedOnboarding: true, isAnonymous: true });
+    });
+
+    test('should keep the answer when the anonymous row is upgraded in place', async () => {
+      await request(app)
+        .patch('/v1/auth/onboarding')
+        .set('Authorization', auth)
+        .send({ hasCompletedOnboarding: true, interests: ['fiction'] });
+
+      const linked = await request(app)
+        .post('/v1/auth/link/email')
+        .set('Authorization', auth)
+        .send({ email: 'reader@example.com', password: 'password1', name: 'Reader' })
+        .expect(httpStatus.OK);
+
+      expect(linked.body.user).toMatchObject({ hasCompletedOnboarding: true, interests: ['fiction'] });
+    });
+
+    test('should not re-ask a device that signed out', async () => {
+      const body = deviceBody(uuidv4());
+      const anon = await request(app).post('/v1/auth/device').send(body);
+      const token = `Bearer ${anon.body.tokens.access.token}`;
+
+      await request(app).patch('/v1/auth/onboarding').set('Authorization', token).send({ hasCompletedOnboarding: true });
+      await request(app)
+        .post('/v1/auth/link/email')
+        .set('Authorization', token)
+        .send({ email: 'signedout@example.com', password: 'password1', name: 'Reader' });
+
+      // the fresh anonymous row this device gets after logout is empty of
+      // everything except the answer to "have you seen onboarding here?"
+      const afterLogout = await request(app).post('/v1/auth/device').send(body).expect(httpStatus.OK);
+      expect(afterLogout.body.user.id).not.toBe(anon.body.user.id);
+      expect(afterLogout.body.user.hasCompletedOnboarding).toBe(true);
+    });
+
+    test('should reject an unknown interest id', async () => {
+      await request(app)
+        .patch('/v1/auth/onboarding')
+        .set('Authorization', auth)
+        .send({ interests: ['astrology'] })
+        .expect(httpStatus.BAD_REQUEST);
+    });
+
+    test('should return 401 without a token', async () => {
+      await request(app).patch('/v1/auth/onboarding').send({ hasCompletedOnboarding: true }).expect(httpStatus.UNAUTHORIZED);
+      await request(app).get('/v1/auth/me').expect(httpStatus.UNAUTHORIZED);
     });
   });
 

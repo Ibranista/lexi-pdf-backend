@@ -27,6 +27,10 @@ const compact = (obj) => {
 /**
  * The `user` half of AuthResponse. Anonymous users get "" for email and name,
  * not a missing key — the client renders the account row off `isAnonymous`.
+ *
+ * `hasCompletedOnboarding` is always present: it is what the client's root
+ * navigator gates on, and an absent key there would read as "not onboarded"
+ * and send a returning reader back through the question.
  */
 const serializeUser = (user) => ({
   id: user.id,
@@ -35,6 +39,9 @@ const serializeUser = (user) => ({
   role: (user.role || 'user').toUpperCase(),
   isEmailVerified: user.isEmailVerified,
   isAnonymous: user.isAnonymous,
+  hasCompletedOnboarding: Boolean(user.hasCompletedOnboarding),
+  interests: user.interests || [],
+  onboardedAt: toMs(user.onboardedAt),
 });
 
 const serializeDocument = (doc) => ({

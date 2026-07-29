@@ -91,6 +91,35 @@ const updateUserById = async (userId, updateBody) => {
 };
 
 /**
+ * Record that this reader has been through onboarding, and what they said they
+ * read. Works for anonymous callers too — that is the point: the answer is
+ * stored against the row `/auth/device` minted for this device, and linking
+ * later upgrades that same row, so nothing has to move and the reader is never
+ * asked twice.
+ *
+ * `interests` replaces the stored list rather than merging into it; it is a
+ * multi-select the client owns end to end. `onboardedAt` is stamped only on the
+ * transition into "completed", so re-sending the same body is a no-op for the
+ * merge tie-break.
+ *
+ * @param {User} user - the caller
+ * @param {Object} body - { hasCompletedOnboarding?, interests? }
+ * @returns {Promise<User>}
+ */
+const setOnboarding = async (user, { hasCompletedOnboarding, interests }) => {
+  const completed = hasCompletedOnboarding ?? user.hasCompletedOnboarding;
+  return prisma.user.update({
+    where: { id: user.id },
+    data: {
+      ...(interests === undefined ? {} : { interests }),
+      hasCompletedOnboarding: completed,
+      ...(completed && !user.onboardedAt ? { onboardedAt: new Date() } : {}),
+      ...(completed ? {} : { onboardedAt: null }),
+    },
+  });
+};
+
+/**
  * Delete user by id
  * @param {string} userId
  * @returns {Promise<User>}
@@ -110,6 +139,7 @@ module.exports = {
   getUserById,
   getUserByEmail,
   updateUserById,
+  setOnboarding,
   deleteUserById,
   isPasswordMatch,
 };
