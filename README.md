@@ -281,6 +281,12 @@ about it are worth knowing before changing any of it:
   last-write-wins; `serverUpdatedAt` is ours and drives the pull cursor. A
   device with a skewed clock can lose a merge but can never make rows invisible
   to other devices.
+- **Deletes are tombstones, and they win ties.** A removed highlight or note is
+  pushed with `deletedAt` set and kept for `SYNC_TOMBSTONE_DAYS` so the other
+  devices can drop their copies. Ties on `updatedAt` break toward the server
+  everywhere *except* a delete: a tombstone that loses one puts a note the
+  reader deleted back on their screen, and the client — told its push
+  succeeded — will never send it again.
 - **Lexi is scoped to one document**, enforced in the system prompt *and* by an
   output check in `ai.service.js` that refuses to put an off-topic answer on the
   wire. Document text reaches the model wrapped as untrusted data.

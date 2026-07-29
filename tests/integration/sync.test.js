@@ -164,6 +164,80 @@ describe('POST /v1/sync', () => {
   });
 });
 
+describe('Deleting a note', () => {
+  const now = Date.now();
+
+  // The exact round trip the client makes: the note is written locally, pushed,
+  // deleted locally, and the tombstone pushed. What matters is that it stays
+  // deleted — on the other device, and on this one after a further sync.
+  test('should stay deleted on both devices, and not come back on the next pull', async () => {
+    const author = await newDevice();
+    const other = { ...author, deviceId: uuidv4() };
+    await prisma.device.create({ data: { deviceId: other.deviceId, userId: author.userId } });
+
+    const note = annotationBody(docKey, { note: 'the whole point of the chapter', updatedAt: now });
+    await push(author, { annotations: [note] });
+
+    // the other device sees the note
+    const sawIt = await push(other, {}).expect(httpStatus.OK);
+    expect(sawIt.body.changes.annotations).toHaveLength(1);
+    expect(sawIt.body.changes.annotations[0]).toMatchObject({ id: note.id, note: note.note, deletedAt: null });
+
+    // the reader deletes it
+    const deletedAt = now + 1000;
+    await push(author, { annotations: [{ ...note, updatedAt: deletedAt, deletedAt }] });
+
+    // the other device is told, rather than being left holding a live row
+    const sawDelete = await push(other, {}, sawIt.body.cursor).expect(httpStatus.OK);
+    expect(sawDelete.body.changes.annotations).toHaveLength(1);
+    expect(sawDelete.body.changes.annotations[0]).toMatchObject({ id: note.id, deletedAt });
+
+    // and it does not come back to the device that deleted it
+    const later = await push(author, {}, null).expect(httpStatus.OK);
+    const revived = later.body.changes.annotations.filter((a) => a.id === note.id && a.deletedAt === null);
+    expect(revived).toEqual([]);
+  });
+
+  test('should accept a note created and deleted before it was ever pushed', async () => {
+    const device = await newDevice();
+    const deletedAt = now + 2000;
+
+    // no prior push: the row's whole life happened offline
+    await push(device, {
+      annotations: [annotationBody(docKey, { note: 'written on a train', updatedAt: deletedAt, deletedAt })],
+    }).expect(httpStatus.OK);
+
+    const stored = await prisma.annotation.findMany({ where: { userId: device.userId } });
+    expect(stored).toHaveLength(1);
+    expect(stored[0].deletedAt).not.toBeNull();
+  });
+
+  test('should let a delete win a tie rather than resurrecting the note', async () => {
+    const device = await newDevice();
+    // created and deleted in the same millisecond — a fast tap, or a clock with
+    // coarse resolution. Ties go to the server everywhere else; not here.
+    await push(device, { annotations: [annotationBody(docKey, { note: 'a thought', updatedAt: now })] });
+    const res = await push(device, {
+      annotations: [annotationBody(docKey, { note: 'a thought', updatedAt: now, deletedAt: now })],
+    }).expect(httpStatus.OK);
+
+    // not handed back as a row the server won with
+    expect(res.body.changes.annotations).toEqual([]);
+    const stored = await prisma.annotation.findFirst({ where: { userId: device.userId } });
+    expect(stored.deletedAt).not.toBeNull();
+  });
+
+  test('should keep the highlight when only the note is cleared', async () => {
+    const device = await newDevice();
+    await push(device, { annotations: [annotationBody(docKey, { note: 'a thought', updatedAt: now })] });
+    await push(device, { annotations: [annotationBody(docKey, { note: '', updatedAt: now + 1000 })] });
+
+    const stored = await prisma.annotation.findMany({ where: { userId: device.userId } });
+    expect(stored).toHaveLength(1);
+    expect(stored[0]).toMatchObject({ note: '', deletedAt: null, color: 'sky' });
+  });
+});
+
 describe('POST /v1/sync/merge', () => {
   test('should fold the anonymous data into the account and delete the anonymous user', async () => {
     const anon = await newDevice();

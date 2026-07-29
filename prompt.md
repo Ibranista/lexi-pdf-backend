@@ -407,6 +407,19 @@ Rules:
    client will re-send in chunks of 200 rows.
 6. Anonymous users sync too. This is not gated on having an account.
 
+#### Deleting
+
+A client never drops a row it has synced — it pushes the same row with
+`deletedAt` set and keeps it locally until the push succeeds. The server keeps
+the tombstone for `SYNC_TOMBSTONE_DAYS` (90) so every other device gets a chance
+to pull it, then purges it.
+
+Ties on `updatedAt` break toward the server, **except for a delete**, which wins
+them. A tombstone that loses a tie resurrects a row the reader removed, and the
+client that pushed it has already been told the push succeeded — so it will
+never send it again. Create-and-delete inside one millisecond is rare, and it is
+exactly the case where "deleted" has to stick.
+
 ---
 
 ## 3. Book suggestions

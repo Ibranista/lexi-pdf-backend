@@ -159,7 +159,18 @@ const applyEntity = async (userId, deviceId, name, incoming, { tolerateCollision
       conflicts.push(spec.identity(row));
       return;
     }
-    if (toMs(row.updatedAt) > toMs(previous.updatedAt)) {
+    // Ties break toward the server, with one exception: a delete. A highlight
+    // that loses a tie is stale data the reader will not notice; a tombstone
+    // that loses one puts a note they deleted back on their screen — and the
+    // client, told its push succeeded, has already dropped the tombstone and
+    // will never send it again. Same-millisecond create-then-delete is rare but
+    // it is exactly the case where "deleted" has to stick.
+    const deleting = row.deletedAt !== null && row.deletedAt !== undefined;
+    const incomingWins = deleting
+      ? toMs(row.updatedAt) >= toMs(previous.updatedAt)
+      : toMs(row.updatedAt) > toMs(previous.updatedAt);
+
+    if (incomingWins) {
       updates.push(prisma[spec.model].update({ where: spec.where(userId, row), data: spec.toData(row, deviceId) }));
     } else {
       // The server's copy is newer or the same age. The client has to be told
