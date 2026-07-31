@@ -24,10 +24,10 @@ module.exports = router;
  *     summary: Books to suggest in the library
  *     description: |
  *       Returns 3–5 rows, consistently — the client renders a fixed number of skeleton
- *       rows. `id` is stable across requests because it is the React key. `readUrl` is an
- *       HTML page, never a PDF or EPUB: it loads in a WebView and a binary renders blank,
- *       and it never carries a `lexiCover` query parameter. Failures and empty results
- *       are 200 with an empty array rather than a 5xx.
+ *       rows. `id` is stable for a given `refresh` page because it is the React key.
+ *       `readUrl` is an HTML page, never a PDF or EPUB: it loads in a WebView and a binary
+ *       renders blank, and it never carries a `lexiCover` query parameter. Failures and
+ *       empty results are 200 with an empty array rather than a 5xx.
  *     tags: [Suggestions]
  *     parameters:
  *       - in: query
@@ -48,6 +48,16 @@ module.exports = router;
  *         description: The user's dominant shelf label, rendered verbatim including emoji
  *         schema:
  *           type: string
+ *       - in: query
+ *         name: refresh
+ *         description: |
+ *           How many times the reader has tapped the library's refresh control. Each
+ *           increment starts one page further down every topic's popular list, so the
+ *           same interests return different books; it wraps after 6 pages.
+ *         schema:
+ *           type: integer
+ *           minimum: 0
+ *           default: 0
  *     responses:
  *       "200":
  *         description: OK

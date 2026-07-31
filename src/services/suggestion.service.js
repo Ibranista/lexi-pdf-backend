@@ -58,6 +58,12 @@ const KINDS = {
 const DEFAULT_INTERESTS = ['self-improvement', 'philosophy', 'fiction'];
 const SHELVES = ['📖 Reading Later', '🔖 To Read', '💛 Favorites'];
 
+// How many distinct shelves a reader can page through with the refresh control
+// before it wraps back to the most popular books. Bounded on purpose: `refresh`
+// only ever climbs, and an unbounded one would mean a new cache entry per tap.
+// Gutendex's first page is 32 books deep, so 6 × a limit of 5 stays inside it.
+const REFRESH_PAGES = 6;
+
 const cache = new Map();
 
 // what follows the comma is not always a given name: Gutenberg also writes
@@ -119,14 +125,22 @@ const fetchTopic = async (topic) => {
 };
 
 /**
- * @param {Object} query - { limit, interests, collection }
+ * @param {Object} query - { limit, interests, collection, refresh }
  * @returns {Promise<{ suggestions: Object[] }>}
  */
-const getSuggestions = async ({ limit = 3, interests, collection }) => {
+const getSuggestions = async ({ limit = 3, interests, collection, refresh = 0 }) => {
   const picked = (interests && interests.length ? interests : DEFAULT_INTERESTS).filter((id) => TOPICS[id]);
   const chosen = picked.length ? picked : DEFAULT_INTERESTS;
 
-  const cacheKey = JSON.stringify({ limit, chosen, collection });
+  // Each tap of the refresh control starts one page further down every topic's
+  // popular list, so the reader gets different books rather than the same ones
+  // re-fetched. Wraps at REFRESH_PAGES rather than running off the end.
+  const page = Math.abs(Math.trunc(refresh) || 0) % REFRESH_PAGES;
+  const offset = page * limit;
+
+  // The page belongs in the key: without it the first shelf would be served
+  // back for every refresh, which is the bug the offset exists to fix.
+  const cacheKey = JSON.stringify({ limit, chosen, collection, page });
   const hit = cache.get(cacheKey);
   if (hit && hit.expiresAt > Date.now()) {
     return hit.value;
@@ -146,12 +160,14 @@ const getSuggestions = async ({ limit = 3, interests, collection }) => {
   );
 
   // round-robin so three interests give three different flavours, and `id`
-  // stays stable across requests because nothing here is randomised
+  // stays stable for a given refresh page because nothing here is randomised
   const suggestions = [];
   const seen = new Set();
   for (let depth = 0; suggestions.length < limit && depth < 5; depth += 1) {
     batches.forEach(({ interest, books }, index) => {
-      const book = books[depth];
+      // A topic shallower than the offset wraps to its own start rather than
+      // dropping out — a short list should still contribute a row.
+      const book = books.length ? books[(offset + depth) % books.length] : undefined;
       if (!book || seen.has(book.id) || suggestions.length >= limit) return;
       seen.add(book.id);
       suggestions.push(toSuggestion(book, interest, collection || SHELVES[index % SHELVES.length]));
