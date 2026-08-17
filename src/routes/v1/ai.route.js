@@ -8,10 +8,16 @@ const router = express.Router();
 
 router.post('/context', auth(), validate(aiValidation.context), aiController.context);
 router.post('/translate', auth(), validate(aiValidation.translate), aiController.translate);
+router.post('/translate/stream', auth(), validate(aiValidation.translate), aiController.translateStream);
 router.post('/chat', auth(), validate(aiValidation.chat), aiController.chat);
 router.post('/chat/stream', auth(), validate(aiValidation.chat), aiController.chatStream);
+router.post('/chat/live', auth(), validate(aiValidation.chatLive), aiController.chatLive);
+router.post('/realtime/session', auth(), validate(aiValidation.realtimeSession), aiController.realtimeSession);
+router.post('/realtime/turn', auth(), validate(aiValidation.realtimeTurn), aiController.realtimeTurn);
 router.get('/chat/history', auth(), validate(aiValidation.chatHistory), aiController.chatHistory);
+router.delete('/chat/history', auth(), validate(aiValidation.clearChat), aiController.clearChat);
 router.post('/speak', auth(), validate(aiValidation.speak), aiController.speak);
+router.post('/transcribe', auth(), validate(aiValidation.transcribe), aiController.transcribe);
 router.get('/tts', auth(), validate(aiValidation.tts), aiController.tts);
 
 module.exports = router;
@@ -185,6 +191,182 @@ module.exports = router;
  *         $ref: '#/components/responses/Unauthorized'
  *       "402":
  *         description: Out of AI credits
+ */
+
+/**
+ * @swagger
+ * /ai/chat/live:
+ *   post:
+ *     summary: One turn of a live, spoken conversation (SSE)
+ *     description: |
+ *       Everything `/ai/chat/stream` sends, plus the reply's audio. The reply is cut into
+ *       sentences and voiced *as it is written*, so playback starts on the first sentence
+ *       instead of after the last word — that gap is the whole difference between a
+ *       conversation and a walkie-talkie.
+ *
+ *       Server-Sent Events, `text/event-stream`:
+ *
+ *       - `data: { "t": "…" }` — a token of the reply.
+ *       - `data: { "s": 0, "url": "https://…/static/tts/card-….mp3", "text": "…" }` — a clip
+ *         is ready. `s` is its play order: clips may arrive out of order, because a repeated
+ *         sentence is a filesystem cache hit and renders instantly while a fresh one does not.
+ *         Play by `s`, holding anything that arrives early.
+ *       - `data: { "done": true, "kind": "normal", "sessionId": "…", "quota": {…} }` — end of
+ *         the turn *and* of the audio queue: no clip is announced after it.
+ *       - `data: { "error": true, "message": "…" }` — the turn failed; the credit is released.
+ *
+ *       Body is `/ai/chat`'s plus `spoken` (default true), which asks for an answer written to
+ *       be heard: a few sentences, no lists or file names, ending in something the reader can
+ *       answer out loud. Closing the connection aborts the model mid-reply; whatever had
+ *       already been said is still saved to the thread, so the transcript matches what was
+ *       shown. Metered as one credit, like any other reply — the speech is free, for the same
+ *       reason `/ai/speak` is.
+ *     tags: [AI]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [docKey, sessionId, message]
+ *             properties:
+ *               docKey:
+ *                 type: string
+ *               sessionId:
+ *                 type: string
+ *               title:
+ *                 type: string
+ *               author:
+ *                 type: string
+ *               page:
+ *                 type: number
+ *               excerpt:
+ *                 type: string
+ *               message:
+ *                 type: string
+ *               style:
+ *                 type: string
+ *                 enum: [simple, balanced, advanced]
+ *               spoken:
+ *                 type: boolean
+ *                 default: true
+ *     responses:
+ *       "200":
+ *         description: An event stream of tokens and clips
+ *         content:
+ *           text/event-stream:
+ *             schema:
+ *               type: string
+ *             example: |
+ *               data: {"t":"It "}
+ *               data: {"t":"turns "}
+ *               data: {"s":0,"url":"https://api.example.com/static/tts/card-9f2c.mp3","text":"It turns night into usable time."}
+ *               data: {"done":true,"kind":"normal","sessionId":"9c1e","quota":{"used":4,"limit":50}}
+ *       "401":
+ *         $ref: '#/components/responses/Unauthorized'
+ *       "402":
+ *         description: Out of AI credits
+ */
+
+/**
+ * @swagger
+ * /ai/chat/history:
+ *   get:
+ *     summary: Prior turns for a document's conversation
+ *     description: Oldest first, capped at 200, so reopening Lexi on a document continues the same thread.
+ *     tags: [AI]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: sessionId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       "200":
+ *         description: OK
+ *       "401":
+ *         $ref: '#/components/responses/Unauthorized'
+ *   delete:
+ *     summary: Forget a document's conversation
+ *     description: |
+ *       Deletes the thread's messages and the session itself, so the next question starts
+ *       fresh. Idempotent: clearing a thread that never reached the server is a 204 too.
+ *       The reader's style memory is not touched — it is not part of this document.
+ *       Free, and never metered.
+ *     tags: [AI]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: sessionId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       "204":
+ *         description: No content
+ *       "401":
+ *         $ref: '#/components/responses/Unauthorized'
+ */
+
+/**
+ * @swagger
+ * /ai/transcribe:
+ *   post:
+ *     summary: Turn a spoken question into text
+ *     description: |
+ *       Backs the mic button in the chat composer. The clip is recorded on the device and
+ *       sent as base64 in the JSON body — every other endpoint here is JSON and the body
+ *       cap is already 6mb, so a few hundred kilobytes of speech needs no multipart stack.
+ *       Nothing is stored: unlike a synthesized clip, a recording of someone's voice has no
+ *       reason to outlive the request that transcribed it.
+ *
+ *       A clip with no speech in it answers 200 with `text: ""` and refunds its credit —
+ *       holding a microphone and saying nothing is a normal outcome, not an error. The
+ *       transcript lands in the composer as an editable draft, never sent on the reader's
+ *       behalf.
+ *     tags: [AI]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [audio]
+ *             properties:
+ *               audio:
+ *                 type: string
+ *                 description: base64 audio, with or without a `data:` prefix
+ *               mimeType:
+ *                 type: string
+ *                 description: the recorder's container, e.g. `audio/m4a`
+ *               lang:
+ *                 type: string
+ *                 enum: [am, ar, en]
+ *                 description: language hint; markedly improves short clips
+ *     responses:
+ *       "200":
+ *         description: OK — `text` is empty when nothing was said
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *             example:
+ *               text: Why does he keep coming back to Sherman?
+ *       "400":
+ *         description: The recording was longer than a minute
+ *       "401":
+ *         $ref: '#/components/responses/Unauthorized'
+ *       "402":
+ *         description: Out of AI credits
+ *       "502":
+ *         description: Transcription failed upstream
  */
 
 /**

@@ -57,7 +57,7 @@ const vocabSchema = Joi.object().keys({
 const sync = {
   body: Joi.object().keys({
     cursor: Joi.string().allow(null, ''),
-    deviceId: Joi.string().uuid().required(),
+    deviceId: Joi.string().max(255).required(),
     changes: Joi.object()
       .keys({
         documents: Joi.array().items(documentSchema).default([]),
@@ -70,7 +70,7 @@ const sync = {
 
 const merge = {
   body: Joi.object().keys({
-    fromDeviceId: Joi.string().uuid().required(),
+    fromDeviceId: Joi.string().max(255).required(),
   }),
 };
 

@@ -46,10 +46,59 @@ const chat = {
   }),
 };
 
+/**
+ * A live voice turn. Same body as a typed one plus `spoken`, which asks for a
+ * reply written to be *heard* — a few sentences ending in something the reader
+ * can answer out loud, rather than the paragraphs a chat bubble can carry.
+ * Defaults true: nothing reaches this route that isn't being spoken.
+ */
+const chatLive = {
+  body: chat.body.keys({
+    spoken: Joi.boolean().default(true),
+  }),
+};
+
+/**
+ * Opening a live voice line. No `message` — nothing has been said yet; this
+ * only names the document the conversation is allowed to be about, which the
+ * server turns into the model's instructions.
+ */
+const realtimeSession = {
+  body: Joi.object().keys({
+    docKey,
+    title: Joi.string().allow('').max(300),
+    author: Joi.string().allow('').max(200),
+    page: Joi.number().integer().min(0),
+    style,
+  }),
+};
+
+/**
+ * One exchange, handed back after it happened. The call itself runs device to
+ * model, so these two strings are the only record of it that reaches us.
+ */
+const realtimeTurn = {
+  body: Joi.object().keys({
+    docKey,
+    sessionId: Joi.string().max(64).required(),
+    title: Joi.string().allow('').max(300),
+    page: Joi.number().integer().min(0),
+    message: Joi.string().max(4000).required(),
+    reply: Joi.string().max(8000).required(),
+  }),
+};
+
 const chatHistory = {
   query: Joi.object().keys({
     sessionId: Joi.string().max(64).required(),
     docKey: Joi.string().length(64).hex(),
+  }),
+};
+
+/** Clearing a thread needs only the thread — the document key is irrelevant. */
+const clearChat = {
+  query: Joi.object().keys({
+    sessionId: Joi.string().max(64).required(),
   }),
 };
 
@@ -66,11 +115,35 @@ const tts = {
   }),
 };
 
+/**
+ * A spoken question, base64 in the JSON body.
+ *
+ * The cap matches `express.json({ limit: '6mb' })` in app.js — going above it
+ * would be decorative, since the body parser rejects the request before any
+ * validation runs. The real length check is on the *decoded* bytes in
+ * stt.service, which is what can tell the reader their recording was too long
+ * instead of failing them with a bare 413.
+ */
+const transcribe = {
+  body: Joi.object().keys({
+    audio: Joi.string()
+      .max(6 * 1024 * 1024)
+      .required(),
+    mimeType: Joi.string().max(60),
+    lang: Joi.string().valid('am', 'ar', 'en'),
+  }),
+};
+
 module.exports = {
   context,
   translate,
   chat,
+  chatLive,
+  realtimeSession,
+  realtimeTurn,
   chatHistory,
+  clearChat,
   speak,
+  transcribe,
   tts,
 };

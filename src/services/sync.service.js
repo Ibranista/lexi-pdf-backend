@@ -2,6 +2,7 @@ const httpStatus = require('http-status');
 const config = require('../config/config');
 const prisma = require('../config/prisma');
 const ApiError = require('../utils/ApiError');
+const aiService = require('./ai.service');
 const { toMs, fromMs, serializeDocument, serializeAnnotation, serializeVocab } = require('../utils/serialize');
 
 // One pull never returns more than this per entity; the cursor comes back
@@ -326,7 +327,7 @@ const mergeOnboarding = async (user, source) => {
  * @returns {Promise<Object>}
  */
 const merge = async (user, fromDeviceId) => {
-  const empty = { merged: { documents: 0, annotations: 0, vocab: 0 } };
+  const empty = { merged: { documents: 0, annotations: 0, vocab: 0, sessions: 0, messages: 0 } };
 
   const device = await prisma.device.findUnique({ where: { deviceId: fromDeviceId }, include: { user: true } });
   if (!device || device.userId === user.id || !device.user.isAnonymous) {
@@ -350,10 +351,24 @@ const merge = async (user, fromDeviceId) => {
 
   await mergeOnboarding(user, source);
 
-  // cascades through the anonymous user's devices, tokens and leftover rows
+  // The conversation, the reader's style memory and the index of what has been
+  // uploaded are server-owned: no client copy, nothing to arbitrate, so they
+  // are moved rather than pushed. This has to happen before the delete below,
+  // which would otherwise cascade all of it away.
+  const ai = await aiService.absorbInto(user.id, source.id);
+
+  // Hand the device to the account before the anonymous row goes, rather than
+  // letting the cascade take it. The Device row is how the same phone is
+  // recognised after a reinstall; losing it would make this device look brand
+  // new the next time it asked for a session — and a brand new device gets a
+  // fresh anonymous allowance, which is the free tier handed out again to
+  // someone who has already spent it.
+  await prisma.device.update({ where: { deviceId: device.deviceId }, data: { userId: user.id } });
+
+  // cascades through the anonymous user's tokens and leftover rows
   await prisma.user.delete({ where: { id: source.id } });
 
-  return { merged };
+  return { merged: { ...merged, ...ai } };
 };
 
 module.exports = {

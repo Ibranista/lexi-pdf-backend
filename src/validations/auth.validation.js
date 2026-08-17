@@ -52,9 +52,10 @@ const verifyEmail = {
 
 const device = {
   body: Joi.object().keys({
-    // a UUID v4 the client generates on first launch and keeps in
-    // expo-secure-store; not an OS identifier and not security-bearing
-    deviceId: Joi.string().uuid().required(),
+    // A stable per-install id from the OS (ANDROID_ID on Android,
+    // identifierForVendor on iOS) — not a UUID on every platform, and not
+    // security-bearing.
+    deviceId: Joi.string().max(255).required(),
     platform: Joi.string().valid('ios', 'android', 'web').required(),
     model: Joi.string().max(120),
     osVersion: Joi.string().max(40),

@@ -30,6 +30,66 @@ const publicUrlFor = (file, requestBase) => {
   return `${base}/static/tts/${file}`;
 };
 
+/* -------------------------------------------------------------------------
+   Filenames are for reading, not for hearing
+   ------------------------------------------------------------------------- */
+
+/**
+ * A filename as it turns up mid-sentence: "scan_2024_0093.pdf". Brackets are
+ * allowed inside the name ("report_v3(1).pdf") but it has to *start* on an
+ * alphanumeric, so an opening bracket around the name is left where it is.
+ *
+ * The extension list is repeated in TRAILING_EXTENSION below — keep the two in
+ * step. They are spelled out rather than composed so both stay literal regexes.
+ */
+const NAMED_FILE = /[A-Za-z0-9][A-Za-z0-9_.()[\]-]*\.(?:pdf|epubs?|docx?|txt|rtf|mobi|djvu|azw3?|pages|pptx?)\b/gi;
+
+/**
+ * Filename-shaped runs with the extension already stripped off. Deliberately
+ * narrow — an underscore join, a long serial, or a hash-like alphanumeric run.
+ * Ordinary text that happens to mix letters and digits ("COVID-19", "GPT-4",
+ * "H2O") has to survive this untouched.
+ */
+const UNSPEAKABLE_RUN =
+  /\b(?:[A-Za-z0-9]+_[A-Za-z0-9_-]+|[A-Za-z-]*\d{5,}[A-Za-z0-9-]*|(?=[A-Za-z0-9]*\d)(?=[A-Za-z0-9]*[A-Za-z])[A-Za-z0-9]{10,})\b/g;
+
+const TRAILING_EXTENSION = /\.(?:pdf|epubs?|docx?|txt|rtf|mobi|djvu|azw3?|pages|pptx?)$/i;
+
+/** A part worth saying: letters only, and pronounceable rather than an acronym-ish run. */
+const isWord = (part) => /^[A-Za-z]{2,}$/.test(part) && /[aeiouy]/i.test(part);
+
+/**
+ * How a document name should be *said*.
+ *
+ * Reading a real filename out loud is miserable — "two zero two four underscore
+ * scan zero zero nine three dot p d f" — so the name is reduced to the words it
+ * actually contains ("Physics_Notes_2024_final_v3" → "Physics Notes final").
+ * When the words don't carry the name (they're outweighed by serials, hashes
+ * and version tags) there is nothing worth hearing, and it becomes a plain
+ * "this document".
+ */
+const spokenName = (raw) => {
+  const stem = raw.replace(TRAILING_EXTENSION, '');
+  // Break the camelCase humps first, so "TheGreatGatsby" comes out as words.
+  const words = stem
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .split(/[^A-Za-z0-9]+/)
+    .filter(isWord);
+
+  const kept = words.join('').length;
+  const total = stem.replace(/[^A-Za-z0-9]/g, '').length;
+  // Half the name has to be real words before it is worth saying at all.
+  return kept && kept * 2 >= total ? words.join(' ') : 'this document';
+};
+
+/**
+ * The narration copy of `text`: identical, except that document names nobody
+ * could pronounce are spoken as "this document". Only the audio is changed —
+ * the reply on screen keeps the real name, so the reader can still see which
+ * file is meant.
+ */
+const speakable = (text) => String(text).replace(NAMED_FILE, spokenName).replace(UNSPEAKABLE_RUN, spokenName);
+
 /**
  * Render `text` to speech with the configured OpenAI TTS model and return a
  * direct, cacheable URL. `tag` is a short, filename-safe label (a language
@@ -98,11 +158,12 @@ const synthesize = async (text, lang, requestBase) => {
  * language: the narration is mostly in the reader's explanation language, which
  * the model can always speak, so "Hear it" reads the card for every language.
  */
-const narrate = async (text, requestBase) => render('card', text, requestBase);
+const narrate = async (text, requestBase) => render('card', speakable(text), requestBase);
 
 module.exports = {
   synthesize,
   narrate,
+  speakable,
   hasVoice,
   AUDIO_DIR,
 };

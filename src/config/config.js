@@ -27,6 +27,11 @@ const envVarsSchema = Joi.object()
     OPENAI_API_KEY: Joi.string().allow('').default('').description('OpenAI key used by the LangChain models'),
     OPENAI_MODEL: Joi.string().default('gpt-4o-mini').description('chat model for translate and Lexi'),
     OPENAI_TTS_MODEL: Joi.string().default('gpt-4o-mini-tts').description('speech model for /ai/tts'),
+    OPENAI_STT_MODEL: Joi.string().default('whisper-1').description('transcription model for /ai/transcribe'),
+    OPENAI_REALTIME_MODEL: Joi.string()
+      .default('gpt-realtime-2.1')
+      .description('speech-to-speech model behind the live voice conversation'),
+    OPENAI_REALTIME_VOICE: Joi.string().default('marin').description('the voice Lexi speaks the live conversation in'),
     TTS_LANGS: Joi.string().default('en,ar').description('languages a TTS voice exists for'),
     GOOGLE_CLIENT_ID: Joi.string()
       .allow('')
@@ -90,6 +95,9 @@ module.exports = {
     apiKey: envVars.OPENAI_API_KEY,
     model: envVars.OPENAI_MODEL,
     ttsModel: envVars.OPENAI_TTS_MODEL,
+    sttModel: envVars.OPENAI_STT_MODEL,
+    realtimeModel: envVars.OPENAI_REALTIME_MODEL,
+    realtimeVoice: envVars.OPENAI_REALTIME_VOICE,
     ttsLangs: envVars.TTS_LANGS.split(',')
       .map((lang) => lang.trim())
       .filter(Boolean),

@@ -81,6 +81,26 @@ const release = async (userId) => {
 };
 
 /**
+ * Refuse now if the budget is already spent, without taking anything.
+ *
+ * For work that is free in itself but opens the door to work that is not —
+ * a live voice line, which costs nothing to establish and then bills per turn.
+ * Metering it would charge for the connection; letting it through unchecked
+ * would hand the reader a microphone that can only ever answer 402.
+ *
+ * @param {User} user
+ * @returns {Promise<User>} the user, rolled over if their period had ended
+ * @throws {ApiError} 402 when the budget is gone
+ */
+const assertAvailable = async (user) => {
+  const current = await rollover(user);
+  if (current.aiUsed >= limitFor(current)) {
+    throw exhausted(current);
+  }
+  return current;
+};
+
+/**
  * Reserve → run → reconcile. The only way AI work should be invoked.
  * @param {User} user
  * @param {Function} run - async () => result
@@ -100,6 +120,7 @@ const meter = async (user, run) => {
 module.exports = {
   limitFor,
   state,
+  assertAvailable,
   reserve,
   release,
   meter,

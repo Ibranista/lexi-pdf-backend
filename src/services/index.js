@@ -6,5 +6,7 @@ module.exports.deviceService = require('./device.service');
 module.exports.syncService = require('./sync.service');
 module.exports.quotaService = require('./quota.service');
 module.exports.aiService = require('./ai.service');
+module.exports.realtimeService = require('./realtime.service');
 module.exports.ttsService = require('./tts.service');
+module.exports.sttService = require('./stt.service');
 module.exports.suggestionService = require('./suggestion.service');
