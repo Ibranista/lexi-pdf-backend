@@ -88,6 +88,21 @@ const realtimeTurn = {
   }),
 };
 
+/**
+ * One page, as extracted by the reflow view. The cap matches what a dense page
+ * of a book actually holds; anything longer is two pages or a bad extraction,
+ * and either way is not what this was designed to read.
+ */
+const pageCheck = {
+  body: Joi.object().keys({
+    docKey,
+    page: Joi.number().integer().min(0).required(),
+    text: Joi.string().max(12000).required(),
+    title: Joi.string().allow('').max(300),
+    author: Joi.string().allow('').max(200),
+  }),
+};
+
 const chatHistory = {
   query: Joi.object().keys({
     sessionId: Joi.string().max(64).required(),
@@ -141,6 +156,7 @@ module.exports = {
   chatLive,
   realtimeSession,
   realtimeTurn,
+  pageCheck,
   chatHistory,
   clearChat,
   speak,

@@ -221,7 +221,29 @@ model DocumentIndex {
   author       String?
   pageCount    Int?
   pagesIndexed Int      @default(0)
+  // Whether this reads as fiction. Null until asked. Nothing is fact-checked
+  // until this is false: a novel is not wrong when it says something untrue.
+  fiction      Boolean?
   updatedAt    DateTime @updatedAt @db.Timestamptz
 
   @@id([userId, docKey])
+}
+
+/// One page's accuracy pass.
+///
+/// Deliberately not scoped to a user. `docKey` is derived from the document's
+/// own bytes, so the same page of the same book is the same page for everyone —
+/// and checking it is expensive enough that the second reader should not pay to
+/// learn what the first already did. `textHash` keys the extraction, so a page
+/// re-extracted differently is re-checked rather than answered from a stale row.
+model PageCheck {
+  docKey    String
+  page      Int
+  textHash  String
+  /// FlaggedClaim[] as written by the model: quote, kind, note, confidence.
+  claims    Json
+  createdAt DateTime @default(now()) @db.Timestamptz
+
+  @@id([docKey, page, textHash])
+  @@index([docKey])
 }

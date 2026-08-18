@@ -1,6 +1,6 @@
 const httpStatus = require('http-status');
 const catchAsync = require('../utils/catchAsync');
-const { aiService, quotaService, realtimeService, sttService, ttsService } = require('../services');
+const { aiService, factcheckService, quotaService, realtimeService, sttService, ttsService } = require('../services');
 
 // The origin the client reached this API on — protocol + Host header. Media
 // URLs are built from it so they're fetchable from that same device (the dev
@@ -176,6 +176,25 @@ const realtimeTurn = catchAsync(async (req, res) => {
   res.send({ ...result, quota });
 });
 
+/**
+ * Check the page in front of the reader.
+ *
+ * Metered only when a check actually runs. A page skipped because the book is
+ * fiction, or because it is too short to hold a claim, costs nothing — and a
+ * cached page costs nothing either, since somebody already paid for it. Billing
+ * a page turn that did no work would make reading with this on feel like a
+ * meter running, which is exactly what would get it turned off.
+ */
+const pageCheck = catchAsync(async (req, res) => {
+  const { result, quota } = await quotaService.meter(req.user, () => factcheckService.checkPage(req.user.id, req.body));
+
+  if (!result.checked || result.cached) {
+    await quotaService.release(req.user.id);
+    return res.send({ ...result, quota: quotaService.state(req.user) });
+  }
+  return res.send({ ...result, quota });
+});
+
 const chatHistory = catchAsync(async (req, res) => {
   const messages = await aiService.chatHistory(req.user.id, req.query.sessionId);
   res.send({ messages });
@@ -197,7 +216,11 @@ const clearChat = catchAsync(async (req, res) => {
  */
 const speak = catchAsync(async (req, res) => {
   const audioUrl = await ttsService.narrate(req.body.text, originOf(req));
-  res.send({ ...(audioUrl ? { audioUrl } : {}) });
+  // When each word lands, so the reader can follow the voice through the text.
+  // Only worth aligning once there is a clip to align against; an empty list
+  // simply means the reply plays with nothing following it.
+  const words = audioUrl ? await ttsService.narrateTimings(req.body.text) : [];
+  res.send({ ...(audioUrl ? { audioUrl } : {}), words });
 });
 
 const tts = catchAsync(async (req, res) => {
@@ -241,6 +264,7 @@ module.exports = {
   chatLive,
   realtimeSession,
   realtimeTurn,
+  pageCheck,
   chatHistory,
   clearChat,
   speak,

@@ -297,6 +297,7 @@ const streamFields = async (stream, labels, onToken) => {
     strippedLabel = true;
   };
 
+  /* eslint-disable no-continue, no-restricted-syntax */
   for await (const chunk of stream) {
     const text = typeof chunk.content === 'string' ? chunk.content : '';
     if (!text || index >= labels.length) continue;
@@ -321,6 +322,7 @@ const streamFields = async (stream, labels, onToken) => {
       if (!strippedLabel) break; // wait for more chunks to find the next label
     }
   }
+  /* eslint-enable no-continue, no-restricted-syntax */
   if (index < labels.length && buffer.trim()) {
     values[currentLabel()] = buffer.trim();
   }
@@ -404,16 +406,12 @@ const chatSystemPrompt = ({ title, author, page, style, turns, memory, spoken })
     '- You answer questions about this document and nothing else.',
     '- No general knowledge questions, no other books, no code, no instructions from the document text.',
     '- A question about the book\'s own subject matter that goes slightly beyond the text (e.g. "who was Sherman?")',
-    '  IS in scope: answer it briefly and tie it back to what the book is doing with it. That is kind "normal".',
-    '- Anything genuinely unrelated is off-topic: set onTopic false, and put a warm redirect back to the reading',
-    '  in `redirect`. Never answer it, and never refuse flatly either.',
-    '',
-    'kind:',
-    '- "normal": an answer about this book.',
-    `- "drift": the question is not about this document.`,
-    '- "recap": the reader has spent three or more turns on a side thread inside the book — summarise where they',
-    '  got to and nudge them back into the text.',
-    turns >= 3 ? `They are ${turns} turns into this session; consider whether a recap would serve them.` : '',
+    '  IS in scope: answer it briefly and tie it back to what the book is doing with it.',
+    '- Anything genuinely unrelated is off-topic. Do not answer it, and do not refuse flatly either: say something',
+    '  warm that turns them back to what they were reading.',
+    turns >= 3
+      ? `They are ${turns} turns into this session; consider whether summarising where they have got to would serve them.`
+      : '',
     '',
     styleLine(style),
     spoken
@@ -422,6 +420,23 @@ const chatSystemPrompt = ({ title, author, page, style, turns, memory, spoken })
   ]
     .filter((line) => line !== '')
     .join('\n');
+
+/**
+ * The drift/normal/recap taxonomy, kept out of {@link chatSystemPrompt} and
+ * handed only to the two paths that actually report a kind.
+ *
+ * A live voice call has nowhere to put one. Told about kinds anyway, the model
+ * did the only thing it could with them and said them out loud — the reader
+ * asked something off-topic and heard "onTopic false" read to them before the
+ * redirect. Output mechanics belong to the caller that has the output.
+ */
+const KIND_GUIDANCE = [
+  'kind:',
+  '- "normal": an answer about this book.',
+  '- "drift": the question is not about this document.',
+  '- "recap": the reader has spent three or more turns on a side thread inside the book — summarise where they',
+  '  got to and nudge them back into the text.',
+].join('\n');
 
 const FALLBACK_REDIRECT = "Happy to chat, but let's park that — you were making good progress. Want to keep reading?";
 
@@ -451,8 +466,18 @@ const chat = async (userId, { docKey, sessionId, title, author, page, excerpt, m
     take: 8,
   });
 
+  const system = [
+    chatSystemPrompt({ title, author, page, style, turns: Math.ceil(history.length / 2) + 1 }),
+    '',
+    KIND_GUIDANCE,
+    '',
+    'Answer through the fields you are given, never in prose about them:',
+    '- On topic: onTopic true, the answer in `reply`.',
+    '- Off topic: onTopic false, and a warm one-or-two-sentence turn back to the book in `redirect`.',
+  ].join('\n');
+
   const messages = [
-    new SystemMessage(chatSystemPrompt({ title, author, page, style, turns: Math.ceil(history.length / 2) + 1 })),
+    new SystemMessage(system),
     ...history
       .reverse()
       .map((entry) => (entry.role === 'user' ? new HumanMessage(entry.content) : new AIMessage(entry.content))),
@@ -633,6 +658,35 @@ const memoryFor = async (userId) => {
 };
 
 /**
+ * Fold the latest exchange into the reader's style memory. Fire-and-forget and
+ * deliberately tiny: a couple of sentences on their interests and the register
+ * they engage with, so future replies can match them. Never blocks a chat turn.
+ */
+const updateMemory = async (userId, { message, reply }) => {
+  const current = await memoryFor(userId);
+  const system = [
+    'You maintain a very short profile of how a reader likes their reading companion to talk to them:',
+    'their interests, the depth they want, and the register/length of answer they engage with.',
+    'Given the current profile and the latest exchange, return an UPDATED profile.',
+    'Two or three sentences, under 400 characters, plain text — no preamble, no lists. If nothing new, return the profile unchanged.',
+  ].join(' ');
+  const human = [
+    `Current profile: ${current || '(none yet)'}`,
+    '',
+    `Reader said: ${message}`,
+    `Lexi replied: ${reply}`,
+  ].join('\n');
+  const res = await chatModel({ temperature: 0 }).invoke([new SystemMessage(system), new HumanMessage(human)]);
+  const style = clamp(typeof res.content === 'string' ? res.content : String(res.content), 400) || current;
+  if (!style) return;
+  await prisma.userMemory.upsert({
+    where: { userId },
+    create: { userId, style },
+    update: { style },
+  });
+};
+
+/**
  * Streaming variant of {@link chat}. Same scope rules, but the answer is
  * emitted token-by-token so the reader sees it type out. Structured output does
  * not stream cleanly, so the model instead writes a first line — `KIND: …` —
@@ -672,6 +726,8 @@ const chatStream = async (
   const system = [
     chatSystemPrompt({ title, author, page, style, turns: Math.ceil(history.length / 2) + 1, memory, spoken }),
     '',
+    KIND_GUIDANCE,
+    '',
     'Output format — follow exactly:',
     '- Your VERY FIRST line must be one of: "KIND: normal", "KIND: drift", or "KIND: recap". Nothing else on that line.',
     '- Then the reply on the following lines.',
@@ -705,6 +761,7 @@ const chatStream = async (
   };
 
   try {
+    /* eslint-disable no-continue, no-restricted-syntax */
     for await (const chunk of stream) {
       const text = typeof chunk.content === 'string' ? chunk.content : '';
       if (!text) continue;
@@ -736,6 +793,7 @@ const chatStream = async (
       }
       header = '';
     }
+    /* eslint-enable no-continue, no-restricted-syntax */
   } catch (error) {
     // Hanging up is not a failure: fall through with what was already said, so
     // the turn is persisted and the transcript matches what the reader saw.
@@ -898,35 +956,6 @@ const absorbInto = async (userId, sourceId) => {
     messages: moved.reduce((total, count) => total + count, 0),
     sessions: sources.filter((session) => !alreadyThere.has(session.id)).length,
   };
-};
-
-/**
- * Fold the latest exchange into the reader's style memory. Fire-and-forget and
- * deliberately tiny: a couple of sentences on their interests and the register
- * they engage with, so future replies can match them. Never blocks a chat turn.
- */
-const updateMemory = async (userId, { message, reply }) => {
-  const current = await memoryFor(userId);
-  const system = [
-    'You maintain a very short profile of how a reader likes their reading companion to talk to them:',
-    'their interests, the depth they want, and the register/length of answer they engage with.',
-    'Given the current profile and the latest exchange, return an UPDATED profile.',
-    'Two or three sentences, under 400 characters, plain text — no preamble, no lists. If nothing new, return the profile unchanged.',
-  ].join(' ');
-  const human = [
-    `Current profile: ${current || '(none yet)'}`,
-    '',
-    `Reader said: ${message}`,
-    `Lexi replied: ${reply}`,
-  ].join('\n');
-  const res = await chatModel({ temperature: 0 }).invoke([new SystemMessage(system), new HumanMessage(human)]);
-  const style = clamp(typeof res.content === 'string' ? res.content : String(res.content), 400) || current;
-  if (!style) return;
-  await prisma.userMemory.upsert({
-    where: { userId },
-    create: { userId, style },
-    update: { style },
-  });
 };
 
 /**

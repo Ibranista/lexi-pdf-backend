@@ -14,6 +14,7 @@ router.post('/chat/stream', auth(), validate(aiValidation.chat), aiController.ch
 router.post('/chat/live', auth(), validate(aiValidation.chatLive), aiController.chatLive);
 router.post('/realtime/session', auth(), validate(aiValidation.realtimeSession), aiController.realtimeSession);
 router.post('/realtime/turn', auth(), validate(aiValidation.realtimeTurn), aiController.realtimeTurn);
+router.post('/page-check', auth(), validate(aiValidation.pageCheck), aiController.pageCheck);
 router.get('/chat/history', auth(), validate(aiValidation.chatHistory), aiController.chatHistory);
 router.delete('/chat/history', auth(), validate(aiValidation.clearChat), aiController.clearChat);
 router.post('/speak', auth(), validate(aiValidation.speak), aiController.speak);

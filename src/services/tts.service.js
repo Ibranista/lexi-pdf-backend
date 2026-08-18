@@ -105,16 +105,23 @@ const speakable = (text) => String(text).replace(NAMED_FILE, spokenName).replace
  * @param {string} [requestBase]
  * @returns {Promise<string|undefined>}
  */
+/**
+ * The clip's filename. Content-addressed over the validated inputs plus a fixed
+ * tag — never raw user text — so nothing here can walk out of AUDIO_DIR, and
+ * identical input is a filesystem hit rather than a second synthesis.
+ */
+const fileFor = (tag, text) => {
+  const digest = crypto.createHash('sha256').update(`${config.openai.ttsModel}:${tag}:${text}`).digest('hex').slice(0, 32);
+  return `${tag}-${digest}.mp3`;
+};
+
 const render = async (tag, text, requestBase) => {
   if (!text || !text.trim()) {
     return undefined;
   }
 
-  // the filename is a hash of validated inputs plus a fixed tag, never raw user
-  // text — nothing here can walk out of AUDIO_DIR
   /* eslint-disable security/detect-non-literal-fs-filename */
-  const digest = crypto.createHash('sha256').update(`${config.openai.ttsModel}:${tag}:${text}`).digest('hex').slice(0, 32);
-  const file = `${tag}-${digest}.mp3`;
+  const file = fileFor(tag, text);
   const target = path.join(AUDIO_DIR, file);
 
   if (fs.existsSync(target)) {
@@ -160,9 +167,61 @@ const synthesize = async (text, lang, requestBase) => {
  */
 const narrate = async (text, requestBase) => render('card', speakable(text), requestBase);
 
+/**
+ * When each word of a clip is spoken, so the reader can follow the voice along
+ * the text instead of hunting for where it has got to.
+ *
+ * Speech models do not hand back word timings, so the clip is read *back* —
+ * transcribed with word-level timestamps. That sounds circular and is actually
+ * the easy case for it: this is forced alignment against audio we generated
+ * ourselves from text we already know, not open-ended recognition.
+ *
+ * Cached next to the mp3 and keyed the same way, so a reply spoken twice is
+ * aligned once. Failure is silent and returns nothing — the clip still plays,
+ * it just plays without anything following it.
+ *
+ * @param {string} text - the same text handed to {@link narrate}
+ * @returns {Promise<{ w: string, s: number, e: number }[]>}
+ */
+const narrateTimings = async (text) => {
+  const spoken = speakable(text);
+  if (!spoken || !spoken.trim()) return [];
+
+  /* eslint-disable security/detect-non-literal-fs-filename */
+  const audio = path.join(AUDIO_DIR, fileFor('card', spoken));
+  const timings = `${audio}.words.json`;
+
+  try {
+    if (fs.existsSync(timings)) {
+      return JSON.parse(await fs.promises.readFile(timings, 'utf8'));
+    }
+    if (!fs.existsSync(audio)) return [];
+
+    const result = await speechClient().audio.transcriptions.create({
+      file: fs.createReadStream(audio),
+      model: config.openai.sttModel,
+      response_format: 'verbose_json',
+      timestamp_granularities: ['word'],
+    });
+
+    const words = (result.words || []).map((word) => ({
+      w: word.word,
+      s: word.start,
+      e: word.end,
+    }));
+    await fs.promises.writeFile(timings, JSON.stringify(words));
+    return words;
+  } catch (error) {
+    logger.warn(`tts: word timings failed — ${error.message}`);
+    return [];
+  }
+  /* eslint-enable security/detect-non-literal-fs-filename */
+};
+
 module.exports = {
   synthesize,
   narrate,
+  narrateTimings,
   speakable,
   hasVoice,
   AUDIO_DIR,
