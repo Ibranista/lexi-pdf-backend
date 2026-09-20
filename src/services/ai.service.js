@@ -365,6 +365,33 @@ const translateStream = async (userId, { docKey, text, context, page, targetLang
   return finalizeCard({ card, text, targetLang, langName, tr, translit, requestBase });
 };
 
+/**
+ * Write one exchange: the reader's turn, then the answer.
+ *
+ * The timestamps are set here rather than left to the column default, which is
+ * the *transaction* clock — both rows of a pair landed on the exact same
+ * microsecond, so nothing downstream could tell which came first. Ordering a
+ * thread by `createdAt` then put the answer above the question about half the
+ * time, in the sheet and in the history handed to the model.
+ */
+const saveTurn = async ({ userId, sessionId, message, reply, kind, page }) => {
+  const asked = new Date();
+  await prisma.chatMessage.createMany({
+    data: [
+      { userId, sessionId, role: 'user', content: message, page: page ?? null, createdAt: asked },
+      {
+        userId,
+        sessionId,
+        role: 'assistant',
+        content: reply,
+        kind,
+        page: page ?? null,
+        createdAt: new Date(asked.getTime() + 1),
+      },
+    ],
+  });
+};
+
 // ── §5.3 Hey Lexi ────────────────────────────────────────────────
 
 const replySchema = z.object({
@@ -501,12 +528,7 @@ const chat = async (userId, { docKey, sessionId, title, author, page, excerpt, m
     reply = answer.redirect || FALLBACK_REDIRECT;
   }
 
-  await prisma.chatMessage.createMany({
-    data: [
-      { userId, sessionId: session.id, role: 'user', content: message, page: page ?? null },
-      { userId, sessionId: session.id, role: 'assistant', content: reply, kind, page: page ?? null },
-    ],
-  });
+  await saveTurn({ userId, sessionId: session.id, message, reply, kind, page });
 
   return { reply, kind, sessionId: session.id };
 };
@@ -815,12 +837,7 @@ const chatStream = async (
   }
   if (!KINDS.includes(kind)) kind = 'normal';
 
-  await prisma.chatMessage.createMany({
-    data: [
-      { userId, sessionId: session.id, role: 'user', content: message, page: page ?? null },
-      { userId, sessionId: session.id, role: 'assistant', content: reply, kind, page: page ?? null },
-    ],
-  });
+  await saveTurn({ userId, sessionId: session.id, message, reply, kind, page });
 
   // Refine what we remember about this reader, off the request path.
   updateMemory(userId, { message, reply }).catch(() => {});
@@ -978,12 +995,7 @@ const recordTurn = async (userId, { docKey, sessionId, title, page, message, rep
     update: { docKey, title },
   });
 
-  await prisma.chatMessage.createMany({
-    data: [
-      { userId, sessionId: session.id, role: 'user', content: message, page: page ?? null },
-      { userId, sessionId: session.id, role: 'assistant', content: reply, kind: 'normal', page: page ?? null },
-    ],
-  });
+  await saveTurn({ userId, sessionId: session.id, message, reply, kind: 'normal', page });
 
   // Spoken turns teach us about the reader the same way typed ones do.
   updateMemory(userId, { message, reply }).catch(() => {});
