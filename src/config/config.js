@@ -25,7 +25,9 @@ const envVarsSchema = Joi.object()
     EMAIL_FROM: Joi.string().description('the from field in the emails sent by the app'),
     PUBLIC_URL: Joi.string().uri().default('http://localhost:3000').description('public origin of this API'),
     GOOGLE_API_KEY: Joi.string().allow('').default('').description('Gemini API key used by every AI feature'),
-    GEMINI_MODEL: Joi.string().default('gemini-3.6-flash').description('chat model for translate, Lexi and transcription'),
+    GEMINI_MODEL: Joi.string()
+      .default('gemini-3.1-flash-lite')
+      .description('chat model for translate, Lexi and transcription'),
     GEMINI_THINKING_BUDGET: Joi.number()
       .integer()
       .allow('')

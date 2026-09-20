@@ -422,12 +422,73 @@ const SPOKEN_GUIDANCE = [
   '- End with a short question or opening the reader can answer out loud, so the talk keeps going.',
 ].join('\n');
 
-const chatSystemPrompt = ({ title, author, page, style, turns, memory, spoken }) =>
+/**
+ * Which language to answer in, and what counts as answering it well.
+ *
+ * Without this the first replies in Amharic or Arabic were noticeably worse
+ * than the later ones: nothing told the model what language the reader wanted,
+ * so it inferred one from a single message and hedged. The quality only
+ * arrived once the session had history and a style memory to lean on — several
+ * turns in. Naming the language up front, and what good prose in it looks
+ * like, is what those later turns were really supplying.
+ *
+ * Deliberately no language *setting* feeds into this. Naming one made the model
+ * answer English questions in Amharic — it read the setting as an order. The
+ * message alone decides the language; these rules decide how well it is
+ * written, which is the part that used to arrive late.
+ */
+/**
+ * The language the reader typed in, when the script says so outright. Cheap and
+ * certain where it applies, which is the half of the problem worth being
+ * certain about: a prompt rule alone lost to a style memory that had recorded
+ * "prefers explanations in Amharic" and answered English questions in Amharic.
+ */
+const scriptLanguage = (text) => {
+  if (/[\u1200-\u137F]/.test(text || '')) return 'Amharic';
+  if (/[\u0600-\u06FF\u0750-\u077F]/.test(text || '')) return 'Arabic';
+  return undefined;
+};
+
+/**
+ * Language memories are worse than useless: they outlive the turn they came
+ * from. A reader who asked three questions in Amharic and then types one in
+ * English is asking in English. The profile keeps tone and interests; the
+ * message keeps the language.
+ */
+const forgetLanguage = (memory) =>
+  (memory || '')
+    .replace(/\b(?:in|into|using)\s+(?:Amharic|Arabic|English|አማርኛ|العربية)\b/gi, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+
+const languageGuidance = (script) =>
+  [
+    'Language — decide this before you write anything:',
+    script
+      ? `- The reader wrote to you in ${script}. Answer in ${script}, in its own script.`
+      : '- Answer in the language the reader wrote their message in.',
+    '- Nothing overrides that: not what you remember about them, not the language they used last time, not the',
+    '  language the document is in.',
+    '- A message typed in Latin letters that is really another language — Amharic or Arabic spelled out phonetically',
+    "  — is that language. Answer it in that language's own script, not in English and not in transliteration.",
+    '- Write like an educated native speaker of it: its own idiom and word order, its own script, correct spelling.',
+    '- Never romanise your reply. A reader typing their language in Latin letters is working around a keyboard, not asking to be answered in English or in transliteration.',
+    '- Do not drift into English mid-sentence. A term with no settled equivalent stays in its original form, once,',
+    '  with a short gloss beside it.',
+    '- Quotes from the document stay verbatim in the language the document is written in; the explanation around them',
+    '  is in the reply language.',
+  ].join('\n');
+
+const chatSystemPrompt = ({ title, author, page, style, turns, memory, spoken, asked }) =>
   [
     `You are Lexi, a reading companion living inside one document: "${title || 'this document'}"${
       author ? ` by ${author}` : ''
     }. The reader is on page ${page ?? '?'}.`,
-    memory ? `\nWhat you remember about this reader (adapt tone and depth to it, never mention it): ${memory}\n` : '',
+    forgetLanguage(memory)
+      ? `\nWhat you remember about this reader (adapt tone and depth to it, never mention it): ${forgetLanguage(memory)}\n`
+      : '',
+    '',
+    languageGuidance(scriptLanguage(asked)),
     '',
     'Scope — this is absolute:',
     '- You answer questions about this document and nothing else.',
@@ -494,7 +555,7 @@ const chat = async (userId, { docKey, sessionId, title, author, page, excerpt, m
   });
 
   const system = [
-    chatSystemPrompt({ title, author, page, style, turns: Math.ceil(history.length / 2) + 1 }),
+    chatSystemPrompt({ title, author, page, style, turns: Math.ceil(history.length / 2) + 1, asked: message }),
     '',
     KIND_GUIDANCE,
     '',
@@ -689,6 +750,8 @@ const updateMemory = async (userId, { message, reply }) => {
   const system = [
     'You maintain a very short profile of how a reader likes their reading companion to talk to them:',
     'their interests, the depth they want, and the register/length of answer they engage with.',
+    'Never record what language they write in — that is decided per message, and a remembered language would',
+    'answer the wrong one.',
     'Given the current profile and the latest exchange, return an UPDATED profile.',
     'Two or three sentences, under 400 characters, plain text — no preamble, no lists. If nothing new, return the profile unchanged.',
   ].join(' ');
@@ -746,7 +809,16 @@ const chatStream = async (
   ]);
 
   const system = [
-    chatSystemPrompt({ title, author, page, style, turns: Math.ceil(history.length / 2) + 1, memory, spoken }),
+    chatSystemPrompt({
+      title,
+      author,
+      page,
+      style,
+      turns: Math.ceil(history.length / 2) + 1,
+      memory,
+      spoken,
+      asked: message,
+    }),
     '',
     KIND_GUIDANCE,
     '',
