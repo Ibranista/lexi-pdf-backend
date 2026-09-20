@@ -32,7 +32,7 @@ You'll need Node.js and a PostgreSQL database.
 
 ```bash
 yarn install
-cp .env.example .env   # fill in your database URL and OpenAI key
+cp .env.example .env   # fill in your database URL and Gemini key (GOOGLE_API_KEY)
 yarn prisma migrate dev
 yarn dev
 ```

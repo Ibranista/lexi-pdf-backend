@@ -71,6 +71,10 @@ const ENTITIES = {
       // verbatim: the reflow reader re-finds the mark by searching for this
       // exact string, so no trimming, no quote normalisation
       text: row.text,
+      // only when sent: an older client pushing an edit must not wipe the
+      // context a newer one stored
+      ...(row.prefix !== undefined ? { prefix: row.prefix || null } : {}),
+      ...(row.suffix !== undefined ? { suffix: row.suffix || null } : {}),
       source: row.source ?? null,
       color: row.color,
       note: row.note || '',

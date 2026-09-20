@@ -5,7 +5,7 @@ const httpStatus = require('http-status');
 // the model is the one thing we never call for real in a test
 jest.mock('../../src/config/langchain', () => ({
   chatModel: jest.fn(),
-  speechClient: jest.fn(),
+  genai: jest.fn(),
   assertConfigured: jest.fn(),
 }));
 

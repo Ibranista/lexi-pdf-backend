@@ -3,7 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const config = require('../config/config');
 const logger = require('../config/logger');
-const { speechClient } = require('../config/langchain');
+const { genai } = require('../config/langchain');
 
 const AUDIO_DIR = path.join(__dirname, '../../public/tts');
 
@@ -11,7 +11,7 @@ const AUDIO_DIR = path.join(__dirname, '../../public/tts');
  * Amharic has no voice on any model we have. The spec's answer is a 200 with
  * `audioUrl` omitted, not an error — the client just hides "Hear it".
  */
-const hasVoice = (lang) => config.openai.ttsLangs.includes(lang);
+const hasVoice = (lang) => config.gemini.ttsLangs.includes(lang);
 
 // A localhost origin means PUBLIC_URL was never configured for a real host —
 // the dev default. An audio URL pointing at localhost is dead on a phone, so
@@ -91,7 +91,7 @@ const spokenName = (raw) => {
 const speakable = (text) => String(text).replace(NAMED_FILE, spokenName).replace(UNSPEAKABLE_RUN, spokenName);
 
 /**
- * Render `text` to speech with the configured OpenAI TTS model and return a
+ * Render `text` to speech with the configured Gemini TTS model and return a
  * direct, cacheable URL. `tag` is a short, filename-safe label (a language
  * code, or "card" for a full narration) that both namespaces the cache and
  * keeps the same input from being synthesized twice.
@@ -106,13 +106,45 @@ const speakable = (text) => String(text).replace(NAMED_FILE, spokenName).replace
  * @returns {Promise<string|undefined>}
  */
 /**
+ * Gemini speaks raw 16-bit mono PCM (`audio/L16;codec=pcm;rate=24000`), which
+ * no player will open as a file. A 44-byte RIFF header makes it a WAV every
+ * phone can play, without pulling in an encoder.
+ */
+const sampleRateOf = (mimeType) => {
+  const match = /rate=(\d+)/.exec(mimeType || '');
+  return match ? Number(match[1]) : 24000;
+};
+
+const toWav = (pcm, sampleRate) => {
+  const header = Buffer.alloc(44);
+  header.write('RIFF', 0);
+  header.writeUInt32LE(36 + pcm.length, 4);
+  header.write('WAVE', 8);
+  header.write('fmt ', 12);
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20); // PCM
+  header.writeUInt16LE(1, 22); // mono
+  header.writeUInt32LE(sampleRate, 24);
+  header.writeUInt32LE(sampleRate * 2, 28);
+  header.writeUInt16LE(2, 32);
+  header.writeUInt16LE(16, 34);
+  header.write('data', 36);
+  header.writeUInt32LE(pcm.length, 40);
+  return Buffer.concat([header, pcm]);
+};
+
+/**
  * The clip's filename. Content-addressed over the validated inputs plus a fixed
  * tag — never raw user text — so nothing here can walk out of AUDIO_DIR, and
  * identical input is a filesystem hit rather than a second synthesis.
  */
 const fileFor = (tag, text) => {
-  const digest = crypto.createHash('sha256').update(`${config.openai.ttsModel}:${tag}:${text}`).digest('hex').slice(0, 32);
-  return `${tag}-${digest}.mp3`;
+  const digest = crypto
+    .createHash('sha256')
+    .update(`${config.gemini.ttsModel}:${config.gemini.ttsVoice}:${tag}:${text}`)
+    .digest('hex')
+    .slice(0, 32);
+  return `${tag}-${digest}.wav`;
 };
 
 const render = async (tag, text, requestBase) => {
@@ -129,14 +161,23 @@ const render = async (tag, text, requestBase) => {
   }
 
   try {
-    const response = await speechClient().audio.speech.create({
-      model: config.openai.ttsModel,
-      voice: 'alloy',
-      input: text,
-      response_format: 'mp3',
+    const response = await genai().models.generateContent({
+      model: config.gemini.ttsModel,
+      contents: [{ parts: [{ text }] }],
+      config: {
+        responseModalities: ['AUDIO'],
+        speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: config.gemini.ttsVoice } } },
+      },
     });
+    const part = (((response.candidates || [])[0] || {}).content || { parts: [] }).parts.find((p) => p.inlineData);
+    if (!part) {
+      throw new Error('no audio in the response');
+    }
     await fs.promises.mkdir(AUDIO_DIR, { recursive: true });
-    await fs.promises.writeFile(target, Buffer.from(await response.arrayBuffer()));
+    await fs.promises.writeFile(
+      target,
+      toWav(Buffer.from(part.inlineData.data, 'base64'), sampleRateOf(part.inlineData.mimeType))
+    );
     return publicUrlFor(file, requestBase);
   } catch (error) {
     // Audio is an enhancement on top of the translation. Losing it must not
@@ -168,15 +209,27 @@ const synthesize = async (text, lang, requestBase) => {
 const narrate = async (text, requestBase) => render('card', speakable(text), requestBase);
 
 /**
+ * How long a word takes to say, relative to the others: its letters, plus the
+ * pause a reader leaves after a comma or a full stop.
+ */
+const spokenWeight = (word) => {
+  let weight = Math.max(word.replace(/[^\p{L}\p{N}]/gu, '').length, 1);
+  if (/[,;:]$/.test(word)) weight += 3;
+  if (/[.!?…]$/.test(word)) weight += 6;
+  return weight;
+};
+
+/**
  * When each word of a clip is spoken, so the reader can follow the voice along
  * the text instead of hunting for where it has got to.
  *
- * Speech models do not hand back word timings, so the clip is read *back* —
- * transcribed with word-level timestamps. That sounds circular and is actually
- * the easy case for it: this is forced alignment against audio we generated
- * ourselves from text we already know, not open-ended recognition.
+ * Gemini's speech model hands back no word timings, and transcribing our own
+ * clip back just to get them would be a second paid call per reply. The clip's
+ * length is known exactly from its PCM, so the words are laid across it in
+ * proportion to how long each takes to say. That drifts by a fraction of a
+ * second at most, which is fine for a highlight that follows along.
  *
- * Cached next to the mp3 and keyed the same way, so a reply spoken twice is
+ * Cached next to the clip and keyed the same way, so a reply spoken twice is
  * aligned once. Failure is silent and returns nothing — the clip still plays,
  * it just plays without anything following it.
  *
@@ -197,18 +250,24 @@ const narrateTimings = async (text) => {
     }
     if (!fs.existsSync(audio)) return [];
 
-    const result = await speechClient().audio.transcriptions.create({
-      file: fs.createReadStream(audio),
-      model: config.openai.sttModel,
-      response_format: 'verbose_json',
-      timestamp_granularities: ['word'],
+    const handle = await fs.promises.open(audio, 'r');
+    const header = Buffer.alloc(44);
+    try {
+      await handle.read(header, 0, 44, 0);
+    } finally {
+      await handle.close();
+    }
+    const duration = header.readUInt32LE(40) / header.readUInt32LE(28);
+
+    const tokens = spoken.split(/\s+/).filter(Boolean);
+    const total = tokens.reduce((sum, word) => sum + spokenWeight(word), 0);
+    let cursor = 0;
+    const words = tokens.map((word) => {
+      const s = (cursor / total) * duration;
+      cursor += spokenWeight(word);
+      return { w: word, s: Number(s.toFixed(3)), e: Number(((cursor / total) * duration).toFixed(3)) };
     });
 
-    const words = (result.words || []).map((word) => ({
-      w: word.word,
-      s: word.start,
-      e: word.end,
-    }));
     await fs.promises.writeFile(timings, JSON.stringify(words));
     return words;
   } catch (error) {

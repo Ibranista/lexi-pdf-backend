@@ -137,6 +137,10 @@ model Annotation {
   docKey    String
   page      Int
   text      String
+  // page text just before/after the passage as selected — picks the right
+  // occurrence when `text` appears more than once on the page
+  prefix    String?
+  suffix    String?
   source    String?
   color     String
   note      String    @default("")

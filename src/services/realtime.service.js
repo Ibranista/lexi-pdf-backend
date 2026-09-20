@@ -1,5 +1,7 @@
 const httpStatus = require('http-status');
+const { Modality } = require('@google/genai');
 const config = require('../config/config');
+const { genai } = require('../config/langchain');
 const prisma = require('../config/prisma');
 const ApiError = require('../utils/ApiError');
 const aiService = require('./ai.service');
@@ -13,21 +15,24 @@ const aiService = require('./ai.service');
  * or two no matter how the chunking is tuned, and a second or two is the
  * difference between talking to someone and leaving them a voicemail.
  *
- * So the model speaks directly. The device holds a WebRTC call with OpenAI's
- * realtime model — audio up, audio down, first word back in a few hundred
- * milliseconds — and the transcript arrives on the same connection, so the chat
- * on screen is written by the same turn the reader is hearing.
+ * So the model speaks directly. The device holds a Gemini Live WebSocket —
+ * 16kHz PCM up, 24kHz PCM down, first word back in a few hundred milliseconds —
+ * and both transcripts arrive on the same connection, so the chat on screen is
+ * written by the same turn the reader is hearing.
  *
- * The API key never leaves this server. The device is given a short-lived
- * client secret instead, minted here with the book's instructions already
- * baked in: the scope rule that keeps Lexi inside one document is not something
- * a client can be trusted to send.
+ * The API key never leaves this server. The device is given a single-use
+ * ephemeral token instead, minted here with the book's instructions locked in:
+ * the scope rule that keeps Lexi inside one document is not something a client
+ * can be trusted to send.
  */
 
-const CLIENT_SECRETS_URL = 'https://api.openai.com/v1/realtime/client_secrets';
-
-/** A minted secret is good for a few minutes; the call outlives it once open. */
 const REQUEST_TIMEOUT_MS = 10000;
+
+/** How long the device has to open the socket with a fresh token. */
+const NEW_SESSION_WINDOW_MS = 60 * 1000;
+
+/** How long a call opened with the token may run. */
+const SESSION_LIFETIME_MS = 30 * 60 * 1000;
 
 /**
  * What a live call adds on top of the spoken-answer rules.
@@ -74,73 +79,67 @@ const instructionsFor = async (userId, { docKey, title, author, page, style }) =
 };
 
 /**
- * Mint a short-lived client secret for one live conversation.
+ * Mint a single-use ephemeral token for one live conversation.
  *
  * @param {string} userId
  * @param {Object} params - { docKey, title, author, page, style }
- * @returns {Promise<{ clientSecret: string, expiresAt: number, model: string, voice: string }>}
+ * @returns {Promise<{ provider: 'gemini', clientSecret: string, expiresAt: number, model: string, voice: string }>}
  */
 const createSession = async (userId, params) => {
-  if (!config.openai.apiKey) {
+  if (!config.gemini.apiKey) {
     throw new ApiError(httpStatus.SERVICE_UNAVAILABLE, 'Live voice is not configured on this server.', true, '', {
       reason: 'REALTIME_NOT_CONFIGURED',
     });
   }
 
   const instructions = await instructionsFor(userId, params);
+  const now = Date.now();
+  const expiresAt = now + NEW_SESSION_WINDOW_MS;
 
-  const response = await fetch(CLIENT_SECRETS_URL, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${config.openai.apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-    body: JSON.stringify({
-      session: {
-        type: 'realtime',
-        model: config.openai.realtimeModel,
-        instructions,
-        audio: {
-          input: {
-            // Server-side turn detection: the model decides when the reader has
-            // finished talking, from the audio itself. The old client-side
-            // silence timer was a guess made from a level meter, and it either
-            // cut people off or made them wait.
-            turn_detection: { type: 'semantic_vad' },
-            transcription: { model: config.openai.sttModel },
+  let token;
+  try {
+    token = await genai().authTokens.create({
+      config: {
+        uses: 1,
+        newSessionExpireTime: new Date(expiresAt).toISOString(),
+        expireTime: new Date(now + SESSION_LIFETIME_MS).toISOString(),
+        liveConnectConstraints: {
+          model: config.gemini.liveModel,
+          config: {
+            responseModalities: [Modality.AUDIO],
+            systemInstruction: instructions,
+            speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: config.gemini.liveVoice } } },
+            // Both sides written down as they are spoken, so the turn can be
+            // shown on screen and posted back to /ai/realtime/turn.
+            inputAudioTranscription: {},
+            outputAudioTranscription: {},
           },
-          output: { voice: config.openai.realtimeVoice },
         },
+        // Ephemeral tokens only exist on the alpha surface.
+        httpOptions: { apiVersion: 'v1alpha', timeout: REQUEST_TIMEOUT_MS },
       },
-    }),
-  });
-
-  if (!response.ok) {
-    const detail = await response.text().catch(() => '');
+    });
+  } catch (error) {
     throw new ApiError(httpStatus.BAD_GATEWAY, "Lexi couldn't open a voice session just now.", true, '', {
       reason: 'REALTIME_SESSION_FAILED',
-      detail: detail.slice(0, 500),
+      detail: String(error.message || '').slice(0, 500),
     });
   }
 
-  const body = await response.json();
-  // The GA shape is `{ value, expires_at }`; older ones nested it under
-  // `client_secret`. Accept both rather than breaking on a field move.
-  const secret = body.value || (body.client_secret && (body.client_secret.value || body.client_secret));
-  const expiresAt = body.expires_at || (body.client_secret && body.client_secret.expires_at);
-
-  if (!secret) {
+  if (!token || !token.name) {
     throw new ApiError(httpStatus.BAD_GATEWAY, "Lexi couldn't open a voice session just now.", true, '', {
       reason: 'REALTIME_SESSION_FAILED',
     });
   }
 
   return {
-    clientSecret: secret,
-    expiresAt: expiresAt ? expiresAt * 1000 : null,
-    model: config.openai.realtimeModel,
-    voice: config.openai.realtimeVoice,
+    provider: 'gemini',
+    // `auth_tokens/…` — the device passes it as `access_token` on the
+    // BidiGenerateContentConstrained socket, or as the SDK's apiKey.
+    clientSecret: token.name,
+    expiresAt,
+    model: config.gemini.liveModel,
+    voice: config.gemini.liveVoice,
   };
 };
 

@@ -24,14 +24,19 @@ const envVarsSchema = Joi.object()
     SMTP_PASSWORD: Joi.string().description('password for email server'),
     EMAIL_FROM: Joi.string().description('the from field in the emails sent by the app'),
     PUBLIC_URL: Joi.string().uri().default('http://localhost:3000').description('public origin of this API'),
-    OPENAI_API_KEY: Joi.string().allow('').default('').description('OpenAI key used by the LangChain models'),
-    OPENAI_MODEL: Joi.string().default('gpt-4o-mini').description('chat model for translate and Lexi'),
-    OPENAI_TTS_MODEL: Joi.string().default('gpt-4o-mini-tts').description('speech model for /ai/tts'),
-    OPENAI_STT_MODEL: Joi.string().default('whisper-1').description('transcription model for /ai/transcribe'),
-    OPENAI_REALTIME_MODEL: Joi.string()
-      .default('gpt-realtime-2.1')
+    GOOGLE_API_KEY: Joi.string().allow('').default('').description('Gemini API key used by every AI feature'),
+    GEMINI_MODEL: Joi.string().default('gemini-3.6-flash').description('chat model for translate, Lexi and transcription'),
+    GEMINI_THINKING_BUDGET: Joi.number()
+      .integer()
+      .allow('')
+      .default(0)
+      .description('thinking tokens per call; 0 keeps it to a minimum, empty leaves the model default'),
+    GEMINI_TTS_MODEL: Joi.string().default('gemini-3.1-flash-tts-preview').description('speech model for /ai/tts'),
+    GEMINI_TTS_VOICE: Joi.string().default('Kore').description('prebuilt voice the TTS model reads in'),
+    GEMINI_LIVE_MODEL: Joi.string()
+      .default('gemini-2.5-flash-native-audio-preview-12-2025')
       .description('speech-to-speech model behind the live voice conversation'),
-    OPENAI_REALTIME_VOICE: Joi.string().default('marin').description('the voice Lexi speaks the live conversation in'),
+    GEMINI_LIVE_VOICE: Joi.string().default('Aoede').description('the voice Lexi speaks the live conversation in'),
     TTS_LANGS: Joi.string().default('en,ar').description('languages a TTS voice exists for'),
     GOOGLE_CLIENT_ID: Joi.string()
       .allow('')
@@ -91,13 +96,14 @@ module.exports = {
     from: envVars.EMAIL_FROM,
   },
   publicUrl: envVars.PUBLIC_URL.replace(/\/$/, ''),
-  openai: {
-    apiKey: envVars.OPENAI_API_KEY,
-    model: envVars.OPENAI_MODEL,
-    ttsModel: envVars.OPENAI_TTS_MODEL,
-    sttModel: envVars.OPENAI_STT_MODEL,
-    realtimeModel: envVars.OPENAI_REALTIME_MODEL,
-    realtimeVoice: envVars.OPENAI_REALTIME_VOICE,
+  gemini: {
+    apiKey: envVars.GOOGLE_API_KEY,
+    model: envVars.GEMINI_MODEL,
+    thinkingBudget: envVars.GEMINI_THINKING_BUDGET === '' ? undefined : envVars.GEMINI_THINKING_BUDGET,
+    ttsModel: envVars.GEMINI_TTS_MODEL,
+    ttsVoice: envVars.GEMINI_TTS_VOICE,
+    liveModel: envVars.GEMINI_LIVE_MODEL,
+    liveVoice: envVars.GEMINI_LIVE_VOICE,
     ttsLangs: envVars.TTS_LANGS.split(',')
       .map((lang) => lang.trim())
       .filter(Boolean),

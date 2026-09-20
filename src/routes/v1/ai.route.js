@@ -208,7 +208,7 @@ module.exports = router;
  *       Server-Sent Events, `text/event-stream`:
  *
  *       - `data: { "t": "…" }` — a token of the reply.
- *       - `data: { "s": 0, "url": "https://…/static/tts/card-….mp3", "text": "…" }` — a clip
+ *       - `data: { "s": 0, "url": "https://…/static/tts/card-….wav", "text": "…" }` — a clip
  *         is ready. `s` is its play order: clips may arrive out of order, because a repeated
  *         sentence is a filesystem cache hit and renders instantly while a fresh one does not.
  *         Play by `s`, holding anything that arrives early.
@@ -263,7 +263,7 @@ module.exports = router;
  *             example: |
  *               data: {"t":"It "}
  *               data: {"t":"turns "}
- *               data: {"s":0,"url":"https://api.example.com/static/tts/card-9f2c.mp3","text":"It turns night into usable time."}
+ *               data: {"s":0,"url":"https://api.example.com/static/tts/card-9f2c.wav","text":"It turns night into usable time."}
  *               data: {"done":true,"kind":"normal","sessionId":"9c1e","quota":{"used":4,"limit":50}}
  *       "401":
  *         $ref: '#/components/responses/Unauthorized'

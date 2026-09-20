@@ -68,6 +68,8 @@ const serializeAnnotation = (annotation) => ({
     docKey: annotation.docKey,
     page: annotation.page,
     text: annotation.text,
+    prefix: annotation.prefix,
+    suffix: annotation.suffix,
     source: annotation.source,
     color: annotation.color,
     createdAt: toMs(annotation.createdAt),

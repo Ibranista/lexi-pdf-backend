@@ -1,8 +1,7 @@
-const { toFile } = require('openai');
 const httpStatus = require('http-status');
 const config = require('../config/config');
 const logger = require('../config/logger');
-const { speechClient } = require('../config/langchain');
+const { genai } = require('../config/langchain');
 const ApiError = require('../utils/ApiError');
 
 /**
@@ -19,19 +18,31 @@ const ApiError = require('../utils/ApiError');
  * outlive the request that transcribed it.
  */
 
-/** What the recorder sends, and what OpenAI will accept back. */
-const MIME_EXTENSIONS = {
-  'audio/m4a': 'm4a',
-  'audio/mp4': 'mp4',
-  'audio/mpeg': 'mp3',
-  'audio/ogg': 'ogg',
-  'audio/wav': 'wav',
-  'audio/webm': 'webm',
-  'audio/x-m4a': 'm4a',
+/**
+ * What the recorder sends, mapped to what Gemini accepts. An .m4a is AAC in an
+ * MP4 container, which Gemini takes as `audio/mp4` but not under its own name.
+ */
+const GEMINI_MIME_TYPES = {
+  'audio/aac': 'audio/aac',
+  'audio/flac': 'audio/flac',
+  'audio/m4a': 'audio/mp4',
+  'audio/mp3': 'audio/mp3',
+  'audio/mp4': 'audio/mp4',
+  'audio/mpeg': 'audio/mp3',
+  'audio/ogg': 'audio/ogg',
+  'audio/wav': 'audio/wav',
+  'audio/webm': 'audio/webm',
+  'audio/x-m4a': 'audio/mp4',
 };
 
+const TRANSCRIBE_PROMPT = [
+  'Transcribe this recording word for word, in the language it is spoken in.',
+  'Reply with the transcript only: no quotes, labels, timestamps or commentary.',
+  'If nobody speaks in it, reply with nothing at all.',
+].join(' ');
+
 /**
- * Below this a "recording" is a tapped-and-released button, not speech. Whisper
+ * Below this a "recording" is a tapped-and-released button, not speech. A model
  * will hallucinate a plausible sentence out of a fraction of a second of room
  * noise, so this is rejected before it reaches the model rather than after.
  */
@@ -46,10 +57,10 @@ const MIN_AUDIO_BYTES = 2048;
 const MAX_AUDIO_BYTES = 4 * 1024 * 1024;
 
 /**
- * Whisper's own way of saying it heard nothing: with no speech in the clip it
- * emits one of a small set of stock phrases (the trailing artefacts of its
- * training data) rather than an empty string. Returning "Thank you." as the
- * reader's question would be worse than admitting we heard nothing.
+ * Speech models' way of saying they heard nothing: with no speech in the clip
+ * they can emit one of a small set of stock phrases rather than an empty
+ * string. Returning "Thank you." as the reader's question would be worse than
+ * admitting we heard nothing.
  */
 const EMPTY_TRANSCRIPTS = ['thank you.', 'thank you', 'thanks for watching!', 'you', 'bye.', '.', 'أهلا بك', 'شكرا'];
 
@@ -77,21 +88,25 @@ const transcribe = async ({ audio, mimeType }) => {
     });
   }
 
-  const extension = MIME_EXTENSIONS[(mimeType || '').toLowerCase()] || 'm4a';
+  const geminiMime = GEMINI_MIME_TYPES[(mimeType || '').toLowerCase()] || 'audio/mp4';
 
   try {
-    const file = await toFile(buffer, `speech.${extension}`, { type: mimeType || 'audio/m4a' });
-    const result = await speechClient().audio.transcriptions.create({
-      file,
-      model: config.openai.sttModel,
-      // Plain text back: no timestamps or segments, since the whole output is
-      // going straight into a text input the reader can edit.
-      response_format: 'text',
+    const result = await genai().models.generateContent({
+      model: config.gemini.model,
+      contents: [
+        { parts: [{ inlineData: { mimeType: geminiMime, data: buffer.toString('base64') } }, { text: TRANSCRIBE_PROMPT }] },
+      ],
+      // Plain text back, since the whole output is going straight into a text
+      // input the reader can edit.
+      config: {
+        temperature: 0,
+        ...(config.gemini.thinkingBudget === undefined
+          ? {}
+          : { thinkingConfig: { thinkingBudget: config.gemini.thinkingBudget } }),
+      },
     });
 
-    // `response_format: 'text'` resolves to a string; older/edge responses come
-    // back as `{ text }`. Handle both rather than trusting one shape.
-    const text = (typeof result === 'string' ? result : result && result.text) || '';
+    const text = (result && result.text) || '';
     return { text: isEmptyTranscript(text) ? '' : text.trim() };
   } catch (error) {
     logger.warn(`transcription failed: ${error.message}`);

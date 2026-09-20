@@ -30,6 +30,10 @@ const annotationSchema = Joi.object().keys({
   // no max, no trim: `text` is the verbatim passage the reflow reader
   // re-finds the highlight by
   text: Joi.string().required(),
+  // verbatim too, for the same reason; absent on highlights made before the
+  // client captured them
+  prefix: Joi.string().allow('', null),
+  suffix: Joi.string().allow('', null),
   source: Joi.string().allow('', null),
   color: Joi.string().valid('amber', 'rose', 'sage', 'sky').required(),
   note: Joi.string().allow('').default(''),

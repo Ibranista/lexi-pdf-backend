@@ -91,8 +91,8 @@ const wordCardSchema = z.object({
     .describe(
       'the translation into the target language, in its script; null when the selection is already in the target language'
     ),
-  // nullable rather than optional: OpenAI's strict structured output requires
-  // every property to be present in `required`, so "no value" has to be null
+  // nullable rather than optional: structured output is steadier when every
+  // property is always present, so "no value" is an explicit null
   translit: z.string().nullable().describe('Latin transliteration of tr; null when the target is already Latin-script'),
   s1: z
     .string()

@@ -1,5 +1,6 @@
 const httpStatus = require('http-status');
 const catchAsync = require('../utils/catchAsync');
+const logger = require('../config/logger');
 const { aiService, factcheckService, quotaService, realtimeService, sttService, ttsService } = require('../services');
 
 // The origin the client reached this API on — protocol + Host header. Media
@@ -70,6 +71,8 @@ const translateStream = catchAsync(async (req, res) => {
     const card = await aiService.translateStream(req.user.id, req.body, originOf(req), (f, t) => send({ f, t }));
     send({ done: true, ...card, quota: quotaService.state(reserved) });
   } catch (error) {
+    // The client only ever sees the friendly line; the reason lives here.
+    logger.error(`${req.originalUrl} failed: ${error.message}`);
     await quotaService.release(reserved.id);
     send({ error: true, message: "Lexi couldn't finish that just now." });
   }
@@ -91,6 +94,8 @@ const chatStream = catchAsync(async (req, res) => {
     const result = await aiService.chatStream(req.user.id, req.body, (token) => send({ t: token }));
     send({ done: true, kind: result.kind, sessionId: result.sessionId, quota: quotaService.state(reserved) });
   } catch (error) {
+    // The client only ever sees the friendly line; the reason lives here.
+    logger.error(`${req.originalUrl} failed: ${error.message}`);
     await quotaService.release(reserved.id);
     send({ error: true, message: 'Lexi could not finish that just now.' });
   }
@@ -136,6 +141,8 @@ const chatLive = catchAsync(async (req, res) => {
     });
     send({ done: true, kind: result.kind, sessionId: result.sessionId, quota: quotaService.state(reserved) });
   } catch (error) {
+    // The client only ever sees the friendly line; the reason lives here.
+    logger.error(`${req.originalUrl} failed: ${error.message}`);
     await quotaService.release(reserved.id);
     send({ error: true, message: 'Lexi could not finish that just now.' });
   }
@@ -145,8 +152,8 @@ const chatLive = catchAsync(async (req, res) => {
 /**
  * Open a live voice conversation.
  *
- * Answers a short-lived client secret the device uses to hold a WebRTC call
- * with the realtime model directly — which is the only way to get the first
+ * Answers a single-use ephemeral token the device uses to hold a Gemini Live
+ * socket with the model directly — which is the only way to get the first
  * word back in a few hundred milliseconds instead of a second or two. The API
  * key stays here; so does the prompt, because the rule that keeps Lexi inside
  * one document is not something a client should be able to rewrite.
