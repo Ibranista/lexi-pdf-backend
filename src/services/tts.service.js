@@ -148,6 +148,63 @@ const fileFor = (tag, text, voice = config.gemini.ttsVoice) => {
   return `${tag}-${digest}.wav`;
 };
 
+/**
+ * A 429 here is usually not a burst the caller can wait out. On the free tier
+ * `gemini-3.1-flash-tts` allows ten requests *per day*
+ * (GenerateRequestsPerDayPerProjectPerModel-FreeTier), and the model answers an
+ * exhausted quota with a retryDelay measured in tens of seconds. Nobody holds a
+ * reply open that long, so only a genuinely short cooldown is worth sleeping
+ * through; anything longer is a wall, not a wait.
+ */
+const TTS_MAX_ATTEMPTS = 2;
+const TTS_MAX_WAIT_MS = 3000;
+
+const isRateLimited = (error) =>
+  /\b429\b|RESOURCE_EXHAUSTED|exceeded your current quota/i.test(String((error && error.message) || ''));
+
+/** The cooldown the model asked for, in ms, or 0 when it named none. */
+const retryDelayMs = (error) => {
+  const match = /"retryDelay":\s?"([\d.]+)s"/.exec(String((error && error.message) || ''));
+  const seconds = match ? Number(match[1]) : NaN;
+  return Number.isFinite(seconds) ? Math.ceil(seconds * 1000) : 0;
+};
+
+/**
+ * When the quota is spent, every later clip in the same reply would fail the
+ * same way. Remembering the cooldown turns five doomed round trips into none,
+ * which is the difference between a reply that is merely unvoiced and one that
+ * takes half a minute to become unvoiced.
+ */
+let quotaBlockedUntil = 0;
+
+/** One synthesis call, retried only through a cooldown short enough to wait. */
+const generateSpeech = async (text, voice) => {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      return await genai().models.generateContent({
+        model: config.gemini.ttsModel,
+        contents: [{ parts: [{ text }] }],
+        config: {
+          responseModalities: ['AUDIO'],
+          speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voice } } },
+        },
+      });
+    } catch (error) {
+      if (!isRateLimited(error)) throw error;
+      const wait = retryDelayMs(error);
+      if (wait > TTS_MAX_WAIT_MS || attempt >= TTS_MAX_ATTEMPTS) {
+        quotaBlockedUntil = Date.now() + (wait || TTS_MAX_WAIT_MS);
+        throw error;
+      }
+      // eslint-disable-next-line no-await-in-loop
+      await new Promise((resolve) => {
+        setTimeout(resolve, wait || TTS_MAX_WAIT_MS);
+      });
+    }
+  }
+};
+
 const render = async (tag, text, requestBase, voiceId) => {
   const voice = resolveVoice(voiceId, config.gemini.ttsVoice);
   if (!text || !text.trim()) {
@@ -162,15 +219,14 @@ const render = async (tag, text, requestBase, voiceId) => {
     return publicUrlFor(file, requestBase);
   }
 
+  // Checked after the cache, never before it: a clip we already hold costs
+  // nothing and must keep playing even while the quota is spent.
+  if (Date.now() < quotaBlockedUntil) {
+    return undefined;
+  }
+
   try {
-    const response = await genai().models.generateContent({
-      model: config.gemini.ttsModel,
-      contents: [{ parts: [{ text }] }],
-      config: {
-        responseModalities: ['AUDIO'],
-        speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voice } } },
-      },
-    });
+    const response = await generateSpeech(text, voice);
     const part = (((response.candidates || [])[0] || {}).content || { parts: [] }).parts.find((p) => p.inlineData);
     if (!part) {
       throw new Error('no audio in the response');
@@ -183,8 +239,9 @@ const render = async (tag, text, requestBase, voiceId) => {
     return publicUrlFor(file, requestBase);
   } catch (error) {
     // Audio is an enhancement on top of the translation. Losing it must not
-    // lose the word card with it.
-    logger.warn(`tts failed for tag=${tag}: ${error.message}`);
+    // lose the word card with it — but a clip that goes missing mid-reply is
+    // worth naming in the log, since all the reader gets is a silent gap.
+    logger.warn(`tts failed for tag=${tag}${isRateLimited(error) ? ' (rate limited)' : ''}: ${error.message}`);
     return undefined;
   }
   /* eslint-enable security/detect-non-literal-fs-filename */

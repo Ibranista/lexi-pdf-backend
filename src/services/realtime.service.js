@@ -1,5 +1,5 @@
 const httpStatus = require('http-status');
-const { Modality } = require('@google/genai');
+const { EndSensitivity, Modality, StartSensitivity } = require('@google/genai');
 const config = require('../config/config');
 const { genai } = require('../config/langchain');
 const prisma = require('../config/prisma');
@@ -127,6 +127,19 @@ const createSession = async (userId, params) => {
             // shown on screen and posted back to /ai/realtime/turn.
             inputAudioTranscription: {},
             outputAudioTranscription: {},
+            // How long Lexi waits on silence before deciding the reader has
+            // finished. The defaults err generous, which in a live call reads
+            // as a beat of dead air before every answer. Half a second is
+            // enough to ride out the pause mid-sentence without the reader
+            // feeling they have to wait to be heard.
+            realtimeInputConfig: {
+              automaticActivityDetection: {
+                startOfSpeechSensitivity: StartSensitivity.START_SENSITIVITY_HIGH,
+                endOfSpeechSensitivity: EndSensitivity.END_SENSITIVITY_HIGH,
+                prefixPaddingMs: 200,
+                silenceDurationMs: 500,
+              },
+            },
           },
         },
         // Ephemeral tokens only exist on the alpha surface.

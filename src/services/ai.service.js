@@ -689,11 +689,12 @@ const findSoftBreak = (text) => {
  * Cuts a reply into speakable clips as it is generated, so playback can start
  * on sentence one instead of after the last word.
  *
- * Synthesis is fired off and *not* awaited — the token stream must never stall
- * behind a TTS request — so clips can be announced out of order (a cached
- * sentence renders instantly, a fresh one takes a moment). Each carries its
- * `seq`, and the client plays them in that order. `end()` is what guarantees
- * every clip has been announced before the caller closes the stream.
+ * Synthesis never blocks the token stream: `push` only queues work, so the
+ * reply keeps arriving on screen while the voice trails behind it. The clips
+ * themselves are made one at a time — the speech model's quota is small enough
+ * that a whole reply fired at once loses all but the first clip to 429s. Each
+ * carries its `seq`, and the client plays them in that order. `end()` is what
+ * guarantees every clip has been announced before the caller closes the stream.
  *
  * @param {Object} params
  * @param {string} [params.requestBase] - origin the caller reached us on
@@ -702,21 +703,29 @@ const findSoftBreak = (text) => {
 const createSpeechChunker = ({ requestBase, onReady, voiceId }) => {
   let buffer = '';
   let seq = 0;
-  const pending = [];
+  // One synthesis at a time. Firing a reply's sentences together spends that
+  // many of the speech model's requests at once — ten a day on the free tier —
+  // and the losers come back 429 and are silently never spoken, so the reader
+  // hears sentence one and then nothing. In order and one at a time, the quota
+  // goes on the sentences that actually get reached. It costs little: a clip
+  // takes about as long to say as to make, so the next is usually ready by the
+  // time the last has played.
+  let chain = Promise.resolve();
 
   const flush = (text) => {
     const clip = text.trim();
     if (!clip) return;
     const at = seq;
     seq += 1;
-    pending.push(
+    chain = chain.then(() =>
       ttsService
         .narrate(clip, requestBase, voiceId)
         .then((url) => {
           if (url) onReady({ seq: at, url, text: clip });
         })
         // A clip that fails to render is simply not spoken. The text of it is
-        // already on the reader's screen, so silence beats failing the turn.
+        // already on the reader's screen, so silence beats failing the turn —
+        // and by here `render` has already exhausted its retries.
         .catch(() => {})
     );
   };
@@ -746,7 +755,9 @@ const createSpeechChunker = ({ requestBase, onReady, voiceId }) => {
       const tail = buffer;
       buffer = '';
       flush(tail);
-      await Promise.allSettled(pending);
+      // The chain resolves only after the last clip has been announced, and
+      // every link swallows its own failure, so this never rejects.
+      await chain;
     },
   };
 };
