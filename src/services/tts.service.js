@@ -4,6 +4,7 @@ const path = require('path');
 const config = require('../config/config');
 const logger = require('../config/logger');
 const { genai } = require('../config/langchain');
+const { resolveVoice } = require('./voices.service');
 
 const AUDIO_DIR = path.join(__dirname, '../../public/tts');
 
@@ -138,22 +139,23 @@ const toWav = (pcm, sampleRate) => {
  * tag — never raw user text — so nothing here can walk out of AUDIO_DIR, and
  * identical input is a filesystem hit rather than a second synthesis.
  */
-const fileFor = (tag, text) => {
+const fileFor = (tag, text, voice = config.gemini.ttsVoice) => {
   const digest = crypto
     .createHash('sha256')
-    .update(`${config.gemini.ttsModel}:${config.gemini.ttsVoice}:${tag}:${text}`)
+    .update(`${config.gemini.ttsModel}:${voice}:${tag}:${text}`)
     .digest('hex')
     .slice(0, 32);
   return `${tag}-${digest}.wav`;
 };
 
-const render = async (tag, text, requestBase) => {
+const render = async (tag, text, requestBase, voiceId) => {
+  const voice = resolveVoice(voiceId, config.gemini.ttsVoice);
   if (!text || !text.trim()) {
     return undefined;
   }
 
   /* eslint-disable security/detect-non-literal-fs-filename */
-  const file = fileFor(tag, text);
+  const file = fileFor(tag, text, voice);
   const target = path.join(AUDIO_DIR, file);
 
   if (fs.existsSync(target)) {
@@ -166,7 +168,7 @@ const render = async (tag, text, requestBase) => {
       contents: [{ parts: [{ text }] }],
       config: {
         responseModalities: ['AUDIO'],
-        speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: config.gemini.ttsVoice } } },
+        speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voice } } },
       },
     });
     const part = (((response.candidates || [])[0] || {}).content || { parts: [] }).parts.find((p) => p.inlineData);
@@ -193,11 +195,11 @@ const render = async (tag, text, requestBase) => {
  * (Amharic has none): the answer is then undefined and the card just hides
  * "Hear it". Backs the `/ai/tts` endpoint.
  */
-const synthesize = async (text, lang, requestBase) => {
+const synthesize = async (text, lang, requestBase, voiceId) => {
   if (!hasVoice(lang)) {
     return undefined;
   }
-  return render(lang, text, requestBase);
+  return render(lang, text, requestBase, voiceId);
 };
 
 /**
@@ -206,7 +208,7 @@ const synthesize = async (text, lang, requestBase) => {
  * language: the narration is mostly in the reader's explanation language, which
  * the model can always speak, so "Hear it" reads the card for every language.
  */
-const narrate = async (text, requestBase) => render('card', speakable(text), requestBase);
+const narrate = async (text, requestBase, voiceId) => render('card', speakable(text), requestBase, voiceId);
 
 /**
  * How long a word takes to say, relative to the others: its letters, plus the
@@ -236,12 +238,13 @@ const spokenWeight = (word) => {
  * @param {string} text - the same text handed to {@link narrate}
  * @returns {Promise<{ w: string, s: number, e: number }[]>}
  */
-const narrateTimings = async (text) => {
+const narrateTimings = async (text, voiceId) => {
+  const voice = resolveVoice(voiceId, config.gemini.ttsVoice);
   const spoken = speakable(text);
   if (!spoken || !spoken.trim()) return [];
 
   /* eslint-disable security/detect-non-literal-fs-filename */
-  const audio = path.join(AUDIO_DIR, fileFor('card', spoken));
+  const audio = path.join(AUDIO_DIR, fileFor('card', spoken, voice));
   const timings = `${audio}.words.json`;
 
   try {

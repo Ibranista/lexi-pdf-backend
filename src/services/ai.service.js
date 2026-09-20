@@ -140,7 +140,7 @@ const bookFor = async (userId, docKey) => {
  * own `card` (a structured-output object for one, parsed stream fields for
  * the other) and has decided `tr`/`translit`.
  */
-const finalizeCard = async ({ card, text, targetLang, langName, tr, translit, requestBase }) => {
+const finalizeCard = async ({ card, text, targetLang, langName, tr, translit, requestBase, voiceId }) => {
   const example = clamp(card.example, 120);
 
   // Voice the whole card, not just the translated word: the selection, the two
@@ -160,7 +160,7 @@ const finalizeCard = async ({ card, text, targetLang, langName, tr, translit, re
   ]
     .filter(Boolean)
     .join(' ');
-  const audioUrl = await ttsService.narrate(spoken, requestBase);
+  const audioUrl = await ttsService.narrate(spoken, requestBase, voiceId);
 
   return {
     word: card.word || text,
@@ -183,10 +183,10 @@ const finalizeCard = async ({ card, text, targetLang, langName, tr, translit, re
  * sense given this book. A dictionary gloss here is a regression.
  *
  * @param {string} userId
- * @param {Object} params - { docKey, text, context, page, targetLang, style }
+ * @param {Object} params - { docKey, text, context, page, targetLang, style, voiceId }
  * @returns {Promise<Object>}
  */
-const translate = async (userId, { docKey, text, context, page, targetLang, style }, requestBase) => {
+const translate = async (userId, { docKey, text, context, page, targetLang, style, voiceId }, requestBase) => {
   assertTranslatable(text);
 
   const langName = LANG_NAMES[targetLang] || targetLang;
@@ -229,7 +229,7 @@ const translate = async (userId, { docKey, text, context, page, targetLang, styl
   const tr = sameLanguage ? undefined : card.tr;
   const translit = sameLanguage || LATIN_LANGS.includes(targetLang) ? undefined : card.translit;
 
-  return finalizeCard({ card, text, targetLang, langName, tr, translit, requestBase });
+  return finalizeCard({ card, text, targetLang, langName, tr, translit, requestBase, voiceId });
 };
 
 // ── §5.2 translate, streamed ─────────────────────────────────────
@@ -335,12 +335,17 @@ const streamFields = async (stream, labels, onToken) => {
  * sees it fill in rather than waiting on the whole card at once.
  *
  * @param {string} userId
- * @param {Object} params - { docKey, text, context, page, targetLang, style }
+ * @param {Object} params - { docKey, text, context, page, targetLang, style, voiceId }
  * @param {string} requestBase
  * @param {(field: string, valueSoFar: string) => void} onToken
  * @returns {Promise<Object>}
  */
-const translateStream = async (userId, { docKey, text, context, page, targetLang, style }, requestBase, onToken) => {
+const translateStream = async (
+  userId,
+  { docKey, text, context, page, targetLang, style, voiceId },
+  requestBase,
+  onToken
+) => {
   assertTranslatable(text);
 
   const langName = LANG_NAMES[targetLang] || targetLang;
@@ -362,7 +367,7 @@ const translateStream = async (userId, { docKey, text, context, page, targetLang
   const tr = value('tr');
   const translit = tr && !LATIN_LANGS.includes(targetLang) ? value('translit') : undefined;
 
-  return finalizeCard({ card, text, targetLang, langName, tr, translit, requestBase });
+  return finalizeCard({ card, text, targetLang, langName, tr, translit, requestBase, voiceId });
 };
 
 /**
@@ -414,12 +419,35 @@ const replySchema = z.object({
  * word. The closing question is what keeps it a conversation instead of a
  * series of announcements: it gives the reader something to answer.
  */
+/**
+ * What the voice can actually pronounce, from TTS_LANGS.
+ *
+ * A spoken turn is not a written one: the written answer follows the reader
+ * into any language they write in, but the voice has only the languages we
+ * configured a voice for. Asked to speak one it does not have, it produces
+ * something between an accent and a mispronunciation, which is worse for the
+ * listener than an honest miss. So it declines instead, in the first language
+ * on the list.
+ */
+const SPOKEN_LANGUAGE_RULE = (() => {
+  const spoken = config.gemini.ttsLangs.map((lang) => LANG_NAMES[lang] || lang);
+  if (!spoken.length) return [];
+  const list = spoken.length === 1 ? spoken[0] : `${spoken.slice(0, -1).join(', ')} and ${spoken[spoken.length - 1]}`;
+  return [
+    `- You speak ${list}, and no other language. This overrides everything else about which language to use.`,
+    `- If the reader speaks anything else, say exactly this in ${spoken[0]}, and nothing more:`,
+    `  "Sorry, I didn't understand you."`,
+    '- Do not attempt their language, do not apologise in it, and do not explain the limitation.',
+  ];
+})();
+
 const SPOKEN_GUIDANCE = [
   'This answer is SPOKEN ALOUD as well as shown as text. Write it to be heard:',
   '- Two to four sentences. Never more; a long answer is punishing to listen to.',
   '- Plain spoken language. No headings, no lists, no markdown, no parentheses, no citations.',
   '- Never read out file names, page numbers or figure labels. Say "this page" instead.',
   '- End with a short question or opening the reader can answer out loud, so the talk keeps going.',
+  ...SPOKEN_LANGUAGE_RULE,
 ].join('\n');
 
 /**
@@ -671,7 +699,7 @@ const findSoftBreak = (text) => {
  * @param {string} [params.requestBase] - origin the caller reached us on
  * @param {(clip: { seq: number, url: string, text: string }) => void} params.onReady
  */
-const createSpeechChunker = ({ requestBase, onReady }) => {
+const createSpeechChunker = ({ requestBase, onReady, voiceId }) => {
   let buffer = '';
   let seq = 0;
   const pending = [];
@@ -683,7 +711,7 @@ const createSpeechChunker = ({ requestBase, onReady }) => {
     seq += 1;
     pending.push(
       ttsService
-        .narrate(clip, requestBase)
+        .narrate(clip, requestBase, voiceId)
         .then((url) => {
           if (url) onReady({ seq: at, url, text: clip });
         })

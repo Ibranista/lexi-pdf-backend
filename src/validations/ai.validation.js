@@ -1,4 +1,5 @@
 const Joi = require('joi');
+const { voiceIds } = require('../services/voices.service');
 
 const docKey = Joi.string().length(64).hex().required();
 const style = Joi.string().valid('simple', 'balanced', 'advanced').default('balanced');
@@ -29,6 +30,7 @@ const translate = {
     context: Joi.string().allow('').max(4000),
     page: Joi.number().integer().min(0),
     targetLang: Joi.string().valid('am', 'ar', 'en').required(),
+    voiceId: Joi.string().valid(...voiceIds),
     style,
   }),
 };
@@ -55,6 +57,7 @@ const chat = {
 const chatLive = {
   body: chat.body.keys({
     spoken: Joi.boolean().default(true),
+    voiceId: Joi.string().valid(...voiceIds),
   }),
 };
 
@@ -70,6 +73,9 @@ const realtimeSession = {
     author: Joi.string().allow('').max(200),
     page: Joi.number().integer().min(0),
     style,
+    voiceId: Joi.string().valid(...voiceIds),
+    excerpt: Joi.string().allow('').max(4000),
+    chapter: Joi.string().allow('').max(300),
   }),
 };
 
@@ -120,6 +126,7 @@ const clearChat = {
 const speak = {
   body: Joi.object().keys({
     text: Joi.string().max(4000).required(),
+    voiceId: Joi.string().valid(...voiceIds),
   }),
 };
 
@@ -127,6 +134,7 @@ const tts = {
   query: Joi.object().keys({
     text: Joi.string().max(500).required(),
     lang: Joi.string().valid('am', 'ar', 'en').required(),
+    voiceId: Joi.string().valid(...voiceIds),
   }),
 };
 

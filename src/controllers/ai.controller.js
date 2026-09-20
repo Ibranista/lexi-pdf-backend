@@ -1,4 +1,5 @@
 const httpStatus = require('http-status');
+const voicesService = require('../services/voices.service');
 const catchAsync = require('../utils/catchAsync');
 const logger = require('../config/logger');
 const { aiService, factcheckService, quotaService, realtimeService, sttService, ttsService } = require('../services');
@@ -135,6 +136,7 @@ const chatLive = catchAsync(async (req, res) => {
     const result = await aiService.chatStream(req.user.id, req.body, (token) => send({ t: token }), {
       signal: hangup.signal,
       speech: {
+        voiceId: req.body.voiceId,
         requestBase: originOf(req),
         onReady: ({ seq, url, text }) => send({ s: seq, url, text }),
       },
@@ -222,11 +224,11 @@ const clearChat = catchAsync(async (req, res) => {
  * re-voices content the reader already paid for, and clips are cached by text.
  */
 const speak = catchAsync(async (req, res) => {
-  const audioUrl = await ttsService.narrate(req.body.text, originOf(req));
+  const audioUrl = await ttsService.narrate(req.body.text, originOf(req), req.body.voiceId);
   // When each word lands, so the reader can follow the voice through the text.
   // Only worth aligning once there is a clip to align against; an empty list
   // simply means the reply plays with nothing following it.
-  const words = audioUrl ? await ttsService.narrateTimings(req.body.text) : [];
+  const words = audioUrl ? await ttsService.narrateTimings(req.body.text, req.body.voiceId) : [];
   res.send({ ...(audioUrl ? { audioUrl } : {}), words });
 });
 
@@ -239,7 +241,9 @@ const tts = catchAsync(async (req, res) => {
     return res.send({ quota: quotaService.state(req.user) });
   }
 
-  const { result, quota } = await quotaService.meter(req.user, () => ttsService.synthesize(text, lang, originOf(req)));
+  const { result, quota } = await quotaService.meter(req.user, () =>
+    ttsService.synthesize(text, lang, originOf(req), req.query.voiceId)
+  );
   return res.send({ ...(result ? { audioUrl: result } : {}), quota });
 });
 
@@ -262,7 +266,12 @@ const transcribe = catchAsync(async (req, res) => {
   return res.send({ text: result.text, quota });
 });
 
+const voices = catchAsync(async (req, res) => {
+  res.send({ voices: voicesService.listVoices(originOf(req)) });
+});
+
 module.exports = {
+  voices,
   context,
   translate,
   translateStream,

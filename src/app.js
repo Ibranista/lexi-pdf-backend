@@ -11,6 +11,7 @@ const { jwtStrategy } = require('./config/passport');
 const { authLimiter } = require('./middlewares/rateLimiter');
 const routes = require('./routes/v1');
 const ttsService = require('./services/tts.service');
+const voicesService = require('./services/voices.service');
 const { errorConverter, errorHandler } = require('./middlewares/error');
 const ApiError = require('./utils/ApiError');
 
@@ -60,6 +61,8 @@ if (config.env === 'production') {
 
 // synthesized speech: no auth on the media URL, cacheable, content-addressed
 app.use('/static/tts', express.static(ttsService.AUDIO_DIR, { maxAge: '7d', immutable: true, fallthrough: true }));
+
+app.use('/static/voices', express.static(voicesService.SAMPLE_DIR, { maxAge: '30d', immutable: true }));
 
 // v1 api routes
 app.use('/v1', routes);

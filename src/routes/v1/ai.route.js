@@ -6,6 +6,7 @@ const aiController = require('../../controllers/ai.controller');
 
 const router = express.Router();
 
+router.get('/voices', auth(), aiController.voices);
 router.post('/context', auth(), validate(aiValidation.context), aiController.context);
 router.post('/translate', auth(), validate(aiValidation.translate), aiController.translate);
 router.post('/translate/stream', auth(), validate(aiValidation.translate), aiController.translateStream);
