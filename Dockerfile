@@ -11,6 +11,9 @@ RUN mkdir -p /usr/src/node-app && chown -R node:node /usr/src/node-app
 WORKDIR /usr/src/node-app
 
 COPY package.json yarn.lock ./
+# prisma.config.ts rides along with the schema: `postinstall` runs
+# `prisma generate`, and v7's CLI reads its config from there.
+COPY prisma.config.ts ./
 COPY prisma ./prisma
 
 USER node

@@ -28,14 +28,18 @@ read the document with you, so you can just ask.
 
 ## Running it locally
 
-You'll need Node.js and a PostgreSQL database.
+You'll need Node.js 20.19+ and a PostgreSQL database.
 
 ```bash
 yarn install
 cp .env.example .env   # fill in your database URL and Gemini key (GOOGLE_API_KEY)
-yarn prisma migrate dev
+yarn db:migrate        # Prisma reads DATABASE_URL through prisma.config.ts
 yarn dev
 ```
+
+Run Prisma from the project root, through the `db:*` scripts or
+`yarn prisma …`, so it's this project's version (7.x) rather than whatever
+`npx prisma` fetches.
 
 The API starts on the port set in `.env`. The [Liqrai app](../lexi-pdf-reader)
 is the client this serves.

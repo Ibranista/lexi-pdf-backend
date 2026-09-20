@@ -1,12 +1,16 @@
 generator client {
+  // v7's `prisma-client` generator emits TypeScript, which this CommonJS
+  // codebase would need a build step to consume. The classic generator still
+  // ships in 7.x and still writes JavaScript into node_modules, so every
+  // `require('@prisma/client')` here keeps working untouched.
   provider        = "prisma-client-js"
-  binaryTargets   = ["native", "linux-musl-openssl-3.0.x"]
   previewFeatures = ["postgresqlExtensions"]
 }
 
 datasource db {
   provider   = "postgresql"
-  url        = env("DATABASE_URL")
+  // The connection url lives in prisma.config.ts (Migrate) and is handed to
+  // PrismaClient as a driver adapter at runtime — v7 takes neither here.
   extensions = [pgvector(map: "vector")]
 }
 
