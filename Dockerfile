@@ -23,3 +23,7 @@ RUN yarn install --pure-lockfile
 COPY --chown=node:node . .
 
 EXPOSE 3000
+
+# apply pending migrations before the server comes up, so a deploy that ships
+# a new migration never serves traffic against the old schema
+CMD ["sh", "-c", "yarn prisma migrate deploy && yarn start"]

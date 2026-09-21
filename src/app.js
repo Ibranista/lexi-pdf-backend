@@ -17,6 +17,11 @@ const ApiError = require('./utils/ApiError');
 
 const app = express();
 
+// deployed behind one reverse proxy (Coolify's Traefik): trust its
+// X-Forwarded-* so the auth rate limiter keys on the client's IP instead of
+// the proxy's, and req.protocol reports https
+app.set('trust proxy', 1);
+
 if (config.env !== 'test') {
   app.use(morgan.successHandler);
   app.use(morgan.errorHandler);
