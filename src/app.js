@@ -64,6 +64,11 @@ if (config.env === 'production') {
   app.use('/v1/auth', authLimiter);
 }
 
+// Lightweight liveness probe for Coolify and external uptime checks.
+app.get('/health', (req, res) => {
+  res.status(httpStatus.OK).json({ status: 'ok' });
+});
+
 // synthesized speech: no auth on the media URL, cacheable, content-addressed
 app.use('/static/tts', express.static(ttsService.AUDIO_DIR, { maxAge: '7d', immutable: true, fallthrough: true }));
 
