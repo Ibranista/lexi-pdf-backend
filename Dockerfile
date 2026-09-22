@@ -1,6 +1,6 @@
 FROM node:24-alpine
 
-RUN apk add --no-cache openssl
+RUN apk add --no-cache openssl curl
 
 # recent node:alpine images no longer bundle yarn classic, and corepack's
 # availability varies by node version, so install yarn directly via npm
